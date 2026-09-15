@@ -1,0 +1,6 @@
+{
+  "name": "ClassFlow AI",
+  "description": "Herramienta CASE colaborativa para modelado UML reactivo y generación determinista de backend",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
