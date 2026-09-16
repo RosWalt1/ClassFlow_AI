@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # Default value is a strictly fictitious placeholder without real credentials.
     DATABASE_URL: str = "postgresql+psycopg://usuario:password@localhost:5432/classflow_ai"
 
+    # JWT Authentication
+    JWT_SECRET_KEY: str = "classflow-insecure-secret-key-change-in-production-32chars"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",

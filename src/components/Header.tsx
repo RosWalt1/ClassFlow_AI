@@ -7,12 +7,14 @@ interface HeaderProps {
   onNavigate: (screen: AppScreen) => void;
   currentUser: UserProfile;
   onSwitchUser: (userKey: 'carlos' | 'ana') => void;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   currentUser,
   onSwitchUser,
+  onLogout,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
@@ -148,13 +150,17 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
                 <button
                   onClick={() => {
-                    onNavigate('login');
                     setShowProfileMenu(false);
+                    if (onLogout) {
+                      onLogout();
+                    } else {
+                      onNavigate('login');
+                    }
                   }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded text-error hover:bg-error-container/30 transition-colors"
                 >
                   <span className="material-symbols-outlined text-[16px]">logout</span>
-                  <span>Cerrar Sesión / Login</span>
+                  <span>Cerrar Sesión</span>
                 </button>
               </div>
             </div>

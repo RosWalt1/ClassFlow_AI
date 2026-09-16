@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppScreen, UserProfile } from './types';
-import { MOCK_USERS } from './data/mockData';
+import { ASSETS, MOCK_USERS } from './data/mockData';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { EditorScreen } from './components/EditorScreen';
@@ -9,79 +9,164 @@ import { BackendGeneratorScreen } from './components/BackendGeneratorScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { RegisterScreen } from './components/RegisterScreen';
+import { authService, AuthUser } from './services/authService';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<AppScreen>('editor');
-  const [currentUserKey, setCurrentUserKey] = useState<'carlos' | 'ana'>('carlos');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => authService.getStoredUser());
+  const [currentScreen, setCurrentScreen] = useState<AppScreen>(() => {
+    // If user has existing token, start on proyectos or editor, otherwise login
+    return authService.isAuthenticated() ? 'proyectos' : 'login';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(true);
+  const [isVerifyingSession, setIsVerifyingSession] = useState(true);
 
-  const currentUser: UserProfile = MOCK_USERS[currentUserKey];
+  // Verify stored session against real backend on mount
+  useEffect(() => {
+    const verifySession = async () => {
+      if (authService.isAuthenticated()) {
+        try {
+          const user = await authService.getMe();
+          setAuthUser(user);
+        } catch {
+          // Token expired or invalid
+          authService.clearSession();
+          setAuthUser(null);
+          setCurrentScreen('login');
+        }
+      } else {
+        setAuthUser(null);
+        if (currentScreen !== 'register') {
+          setCurrentScreen('login');
+        }
+      }
+      setIsVerifyingSession(false);
+    };
 
-  const handleSwitchUser = (userKey: 'carlos' | 'ana') => {
-    setCurrentUserKey(userKey);
+    verifySession();
+  }, []);
+
+  // Protected route handler: blocks unauthenticated access to private screens
+  const handleNavigate = (screen: AppScreen) => {
+    if (!authUser && screen !== 'login' && screen !== 'register') {
+      // Redirect to login if attempting to access a private screen without session
+      setCurrentScreen('login');
+      return;
+    }
+    setCurrentScreen(screen);
   };
 
-  // Auth screen routes without IDE shell
+  // Login handler
+  const handleLoginSuccess = (user: AuthUser) => {
+    setAuthUser(user);
+    // Redirect to projects screen (CU01 flow: Login -> Projects)
+    setCurrentScreen('proyectos');
+  };
+
+  // Logout handler
+  const handleLogout = async () => {
+    await authService.logout();
+    setAuthUser(null);
+    setCurrentScreen('login');
+  };
+
+  // Convert authenticated user to UserProfile for IDE components
+  const currentUser: UserProfile = authUser
+    ? {
+        name: authUser.nombre,
+        email: authUser.email,
+        role: authUser.email.toLowerCase().includes('carlos') ? 'Propietario' : 'Invitado',
+        avatar: authUser.email.toLowerCase().includes('carlos')
+          ? ASSETS.carlosMendoza
+          : ASSETS.anaLopez,
+        permissionsBadge: authUser.email.toLowerCase().includes('carlos')
+          ? 'Full Control • Propietario'
+          : 'Lectura / Edición UML • Invitado',
+      }
+    : MOCK_USERS['carlos'];
+
+  const handleSwitchUser = (userKey: 'carlos' | 'ana') => {
+    // For manual switching in UI mock parts
+    const mock = MOCK_USERS[userKey];
+    if (authUser) {
+      setAuthUser({
+        ...authUser,
+        nombre: mock.name,
+        email: mock.email,
+      });
+    }
+  };
+
+  // Render Login Screen
   if (currentScreen === 'login') {
     return (
       <div className="relative min-h-screen bg-background text-on-surface">
         <LoginScreen
-          onLoginSuccess={(userKey) => {
-            setCurrentUserKey(userKey);
-            setCurrentScreen('editor');
-          }}
+          onLoginSuccess={handleLoginSuccess}
           onNavigateToRegister={() => setCurrentScreen('register')}
         />
 
-        {/* Floating Screen Switcher bar */}
         <QuickScreenSwitcher
           currentScreen={currentScreen}
-          onNavigate={setCurrentScreen}
+          onNavigate={handleNavigate}
           show={showQuickSwitcher}
           onToggle={() => setShowQuickSwitcher(!showQuickSwitcher)}
+          isAuthenticated={!!authUser}
         />
       </div>
     );
   }
 
+  // Render Register Screen
   if (currentScreen === 'register') {
     return (
       <div className="relative min-h-screen bg-background text-on-surface">
         <RegisterScreen
-          onRegisterSuccess={(userKey) => {
-            setCurrentUserKey(userKey);
-            setCurrentScreen('editor');
+          onRegisterSuccess={() => {
+            setCurrentScreen('login');
           }}
           onNavigateToLogin={() => setCurrentScreen('login')}
         />
 
-        {/* Floating Screen Switcher bar */}
         <QuickScreenSwitcher
           currentScreen={currentScreen}
-          onNavigate={setCurrentScreen}
+          onNavigate={handleNavigate}
           show={showQuickSwitcher}
           onToggle={() => setShowQuickSwitcher(!showQuickSwitcher)}
+          isAuthenticated={!!authUser}
         />
       </div>
     );
   }
 
-  // Full IDE Layout for main workflow
+  // Fallback if not authenticated and tried to access private screen
+  if (!authUser && !isVerifyingSession) {
+    return (
+      <div className="relative min-h-screen bg-background text-on-surface">
+        <LoginScreen
+          onLoginSuccess={handleLoginSuccess}
+          onNavigateToRegister={() => setCurrentScreen('register')}
+        />
+      </div>
+    );
+  }
+
+  // Full IDE Layout for authenticated session
   return (
     <div className="min-h-screen bg-background text-on-surface flex flex-col relative overflow-x-hidden font-sans">
       {/* 1. Global Shell Header */}
       <Header
         currentScreen={currentScreen}
-        onNavigate={setCurrentScreen}
+        onNavigate={handleNavigate}
         currentUser={currentUser}
         onSwitchUser={handleSwitchUser}
+        onLogout={handleLogout}
       />
 
       {/* 2. Left IDE Sidebar */}
       <Sidebar
         currentScreen={currentScreen}
-        onNavigate={setCurrentScreen}
+        onNavigate={handleNavigate}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
@@ -93,12 +178,12 @@ export default function App() {
         }`}
       >
         {currentScreen === 'editor' && (
-          <EditorScreen onNavigate={setCurrentScreen} currentUser={currentUser} />
+          <EditorScreen onNavigate={handleNavigate} currentUser={currentUser} />
         )}
 
         {currentScreen === 'proyectos' && (
           <ProjectsScreen
-            onNavigate={setCurrentScreen}
+            onNavigate={handleNavigate}
             currentUser={currentUser}
             initialFilter="all"
           />
@@ -106,19 +191,19 @@ export default function App() {
 
         {currentScreen === 'compartidos' && (
           <ProjectsScreen
-            onNavigate={setCurrentScreen}
+            onNavigate={handleNavigate}
             currentUser={currentUser}
             initialFilter="guest"
           />
         )}
 
         {currentScreen === 'backend' && (
-          <BackendGeneratorScreen onNavigate={setCurrentScreen} currentUser={currentUser} />
+          <BackendGeneratorScreen onNavigate={handleNavigate} currentUser={currentUser} />
         )}
 
         {currentScreen === 'perfil' && (
           <ProfileScreen
-            onNavigate={setCurrentScreen}
+            onNavigate={handleNavigate}
             currentUser={currentUser}
             onSwitchUser={handleSwitchUser}
           />
@@ -128,38 +213,46 @@ export default function App() {
       {/* 4. Floating Quick Screen Switcher bar */}
       <QuickScreenSwitcher
         currentScreen={currentScreen}
-        onNavigate={setCurrentScreen}
+        onNavigate={handleNavigate}
         show={showQuickSwitcher}
         onToggle={() => setShowQuickSwitcher(!showQuickSwitcher)}
+        isAuthenticated={!!authUser}
       />
     </div>
   );
 }
 
-// Quick Switcher Dock to let user easily explore and switch between all 6 screens
+// Quick Switcher Dock
 interface QuickSwitcherProps {
   currentScreen: AppScreen;
   onNavigate: (s: AppScreen) => void;
   show: boolean;
   onToggle: () => void;
+  isAuthenticated: boolean;
 }
 
-function QuickScreenSwitcher({ currentScreen, onNavigate, show, onToggle }: QuickSwitcherProps) {
-  const screens: { id: AppScreen; label: string; icon: string; tag: string }[] = [
+function QuickScreenSwitcher({
+  currentScreen,
+  onNavigate,
+  show,
+  onToggle,
+  isAuthenticated,
+}: QuickSwitcherProps) {
+  const screens: { id: AppScreen; label: string; icon: string; tag: string; isPublic?: boolean }[] = [
     { id: 'editor', label: 'Editor UML', icon: 'account_tree', tag: 'Lienzo Activo' },
-    { id: 'backend', label: 'Backend CU10', icon: 'bolt', tag: 'Spring / Nest' },
+    { id: 'backend', label: 'Backend CU10', icon: 'bolt', tag: 'Spring' },
     { id: 'proyectos', label: 'Mis Proyectos', icon: 'dataset', tag: 'CU02' },
     { id: 'compartidos', label: 'Compartidos', icon: 'share', tag: 'Invitado' },
     { id: 'perfil', label: 'Perfil', icon: 'manage_accounts', tag: 'Ajustes' },
-    { id: 'login', label: 'Iniciar Sesión', icon: 'login', tag: 'CU01' },
-    { id: 'register', label: 'Registro', icon: 'person_add', tag: 'CU01' },
+    { id: 'login', label: 'Iniciar Sesión', icon: 'login', tag: 'CU01', isPublic: true },
+    { id: 'register', label: 'Registro', icon: 'person_add', tag: 'CU01', isPublic: true },
   ];
 
   if (!show) {
     return (
       <button
         onClick={onToggle}
-        className="fixed bottom-3 right-3 z-50 p-2 rounded-full bg-surface-container-high/90 backdrop-blur-md text-primary hover:text-on-surface shadow-xl border border-outline-variant/30 flex items-center justify-center transition-all"
+        className="fixed bottom-3 right-3 z-50 p-2 rounded-full bg-surface-container-high/90 backdrop-blur-md text-primary hover:text-on-surface shadow-xl border border-outline-variant/30 flex items-center justify-center transition-all cursor-pointer"
         title="Mostrar conmutador de pantallas"
       >
         <span className="material-symbols-outlined text-[20px]">swap_horiz</span>
@@ -174,25 +267,30 @@ function QuickScreenSwitcher({ currentScreen, onNavigate, show, onToggle }: Quic
       </span>
       {screens.map((item) => {
         const isActive = currentScreen === item.id;
+        const isLocked = !isAuthenticated && !item.isPublic;
         return (
           <button
             key={item.id}
             onClick={() => onNavigate(item.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
               isActive
                 ? 'bg-primary text-on-primary font-semibold shadow-md'
+                : isLocked
+                ? 'text-outline/50 hover:bg-surface-container hover:text-outline'
                 : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
             }`}
-            title={`${item.label} (${item.tag})`}
+            title={`${item.label} (${item.tag})${isLocked ? ' - Requiere Iniciar Sesión' : ''}`}
           >
-            <span className="material-symbols-outlined text-[15px]">{item.icon}</span>
+            <span className="material-symbols-outlined text-[15px]">
+              {isLocked ? 'lock' : item.icon}
+            </span>
             <span className="truncate">{item.label}</span>
           </button>
         );
       })}
       <button
         onClick={onToggle}
-        className="p-1 rounded-full text-outline hover:text-on-surface hover:bg-surface-container transition-colors ml-1"
+        className="p-1 rounded-full text-outline hover:text-on-surface hover:bg-surface-container transition-colors ml-1 cursor-pointer"
         title="Ocultar conmutador rápido"
       >
         <span className="material-symbols-outlined text-[15px]">close</span>

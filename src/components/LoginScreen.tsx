@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { AppScreen } from '../types';
 import { ASSETS } from '../data/mockData';
+import { authService, AuthUser } from '../services/authService';
 
 interface LoginScreenProps {
-  onLoginSuccess: (userKey: 'carlos' | 'ana') => void;
+  onLoginSuccess: (user: AuthUser) => void;
   onNavigateToRegister: () => void;
 }
 
@@ -11,23 +11,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLoginSuccess,
   onNavigateToRegister,
 }) => {
-  const [email, setEmail] = useState('carlos.mendoza@classflow.ai');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('carlos@classflow.com');
+  const [password, setPassword] = useState('ClassFlow2026!');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const executeLogin = async (loginEmail: string, loginPass: string) => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const response = await authService.login(loginEmail, loginPass);
+      onLoginSuccess(response.user);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error de conexión con el servidor backend.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      if (email.includes('ana')) {
-        onLoginSuccess('ana');
-      } else {
-        onLoginSuccess('carlos');
-      }
-    }, 600);
+    executeLogin(email, password);
   };
 
   return (
@@ -64,12 +70,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </p>
         </div>
 
+        {/* Real Error Message Banner */}
+        {errorMessage && (
+          <div className="p-3 rounded-lg bg-error-container/30 border border-error/40 text-error flex items-start gap-2.5 text-xs animate-shake">
+            <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">error</span>
+            <div className="flex-1">
+              <span className="font-semibold block">Error de autenticación:</span>
+              <span>{errorMessage}</span>
+            </div>
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-xs">
           <div className="flex flex-col gap-1.5">
             <label className="text-on-surface font-semibold flex items-center justify-between">
               <span>Correo Electrónico</span>
-              <span className="font-mono text-[10px] text-primary">Workspace ID</span>
+              <span className="font-mono text-[10px] text-primary">PostgreSQL Auth</span>
             </label>
             <div className="relative">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">
@@ -80,7 +97,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="desarrollador@empresa.com"
+                placeholder="carlos@classflow.com"
                 className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary border border-outline-variant/20"
               />
             </div>
@@ -91,7 +108,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <label className="text-on-surface font-semibold">Contraseña</label>
               <button
                 type="button"
-                onClick={() => alert('Se ha enviado un enlace de recuperación a tu correo.')}
+                onClick={() => alert('Para entornos de prueba, use la contraseña: ClassFlow2026!')}
                 className="text-[11px] text-primary hover:underline"
               >
                 ¿Olvidaste tu contraseña?
@@ -106,6 +123,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
                 className="w-full pl-9 pr-10 py-2.5 rounded-lg bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary border border-outline-variant/20"
               />
               <button
@@ -137,12 +155,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 px-4 rounded-lg bg-primary text-on-primary font-semibold text-xs hover:bg-primary-fixed-dim transition-all shadow-md shadow-primary/30 flex items-center justify-center gap-2 mt-2 cursor-pointer"
+            className="w-full py-2.5 px-4 rounded-lg bg-primary text-on-primary font-semibold text-xs hover:bg-primary-fixed-dim transition-all shadow-md shadow-primary/30 flex items-center justify-center gap-2 mt-2 cursor-pointer disabled:opacity-60"
           >
             {isLoading ? (
               <>
                 <span className="material-symbols-outlined text-[18px] animate-spin">refresh</span>
-                <span>Iniciando sesión...</span>
+                <span>Validando credenciales...</span>
               </>
             ) : (
               <>
@@ -157,26 +175,40 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         <div className="flex items-center gap-3">
           <div className="h-px flex-1 bg-outline-variant/30"></div>
           <span className="font-mono text-[10px] text-outline uppercase tracking-wider">
-            O continuar con
+            Cuentas de prueba oficiales
           </span>
           <div className="h-px flex-1 bg-outline-variant/30"></div>
         </div>
 
-        {/* Social Auth Buttons */}
+        {/* Quick Test Accounts */}
         <div className="grid grid-cols-2 gap-3 text-xs">
           <button
-            onClick={() => onLoginSuccess('carlos')}
-            className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface transition-colors border border-outline-variant/20"
+            type="button"
+            disabled={isLoading}
+            onClick={() => {
+              setEmail('carlos@classflow.com');
+              setPassword('ClassFlow2026!');
+              executeLogin('carlos@classflow.com', 'ClassFlow2026!');
+            }}
+            className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface transition-colors border border-outline-variant/20 disabled:opacity-60"
+            title="Iniciar sesión real como Carlos (Propietario)"
           >
-            <span className="material-symbols-outlined text-[18px] text-on-surface">terminal</span>
-            <span>GitHub</span>
+            <span className="material-symbols-outlined text-[18px] text-on-surface">shield_person</span>
+            <span>Carlos (Propietario)</span>
           </button>
           <button
-            onClick={() => onLoginSuccess('ana')}
-            className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface transition-colors border border-outline-variant/20"
+            type="button"
+            disabled={isLoading}
+            onClick={() => {
+              setEmail('ana@classflow.com');
+              setPassword('ClassFlow2026!');
+              executeLogin('ana@classflow.com', 'ClassFlow2026!');
+            }}
+            className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface transition-colors border border-outline-variant/20 disabled:opacity-60"
+            title="Iniciar sesión real como Ana (Invitado)"
           >
-            <span className="material-symbols-outlined text-[18px] text-primary">cloud</span>
-            <span>Google Work</span>
+            <span className="material-symbols-outlined text-[18px] text-primary">person</span>
+            <span>Ana (Invitado)</span>
           </button>
         </div>
 
@@ -195,7 +227,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       {/* Security disclaimer footer */}
       <div className="mt-6 flex items-center gap-2 text-[11px] text-outline font-mono">
         <span className="material-symbols-outlined text-[14px] text-tertiary">lock</span>
-        <span>Seguridad de nivel empresarial • Cifrado AES-256 en tránsito y reposo</span>
+        <span>Autenticación JWT • PostgreSQL classflow_ai • Cifrado Bcrypt</span>
       </div>
     </div>
   );
