@@ -1,12 +1,16 @@
 import json
+from pathlib import Path
 from typing import List, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+ENV_FILE_PATH = BACKEND_DIR / ".env"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(str(ENV_FILE_PATH), ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -17,8 +21,9 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api"
     ENVIRONMENT: str = "development"
 
-    # Database
-    DATABASE_URL: str = "postgresql+psycopg://postgres:123456@localhost:5432/classflow_ai"
+    # Database: Loaded exclusively from backend/.env or environment variables.
+    # Default value is a strictly fictitious placeholder without real credentials.
+    DATABASE_URL: str = "postgresql+psycopg://usuario:password@localhost:5432/classflow_ai"
 
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [
