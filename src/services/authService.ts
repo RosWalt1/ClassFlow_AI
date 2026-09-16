@@ -6,10 +6,11 @@
 export interface AuthUser {
   id_usuario: number;
   nombre: string;
+  apellido?: string | null;
   email: string;
   estado: string;
+  fecha_registro: string;
   ultimo_acceso: string | null;
-  creado_en: string;
 }
 
 export interface LoginResponse {
@@ -123,7 +124,9 @@ class AuthService {
   }
 
   /**
-   * Cierra sesión notificando al backend y limpiando el almacenamiento local
+   * Cierra sesión bajo arquitectura JWT stateless:
+   * Notifica opcionalmente al backend para acuse de recibo y elimina el token
+   * y los datos de usuario de localStorage. El backend no mantiene blacklist en servidor.
    */
   async logout(): Promise<void> {
     const token = this.getToken();
@@ -136,7 +139,7 @@ class AuthService {
           },
         });
       } catch {
-        // Ignorar fallos de red en logout
+        // Ignorar fallos de red en logout stateless
       }
     }
     this.clearSession();

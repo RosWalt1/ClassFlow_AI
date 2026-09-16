@@ -25,10 +25,23 @@ class Settings(BaseSettings):
     # Default value is a strictly fictitious placeholder without real credentials.
     DATABASE_URL: str = "postgresql+psycopg://usuario:password@localhost:5432/classflow_ai"
 
-    # JWT Authentication
-    JWT_SECRET_KEY: str = "classflow-insecure-secret-key-change-in-production-32chars"
+    # JWT Authentication: Obligatoria desde backend/.env o variables de entorno.
+    # No se permite ninguna clave secreta funcional en código versionado.
+    JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
+    @field_validator("JWT_SECRET_KEY")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        cleaned = v.strip() if v else ""
+        if not cleaned or "change-this" in cleaned.lower() or "insecure" in cleaned.lower():
+            raise ValueError(
+                "JWT_SECRET_KEY es obligatoria y debe configurarse exclusivamente en backend/.env o variables de entorno con una clave segura (mínimo 32 caracteres)."
+            )
+        if len(cleaned) < 32:
+            raise ValueError("JWT_SECRET_KEY debe contener al menos 32 caracteres.")
+        return cleaned
 
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [

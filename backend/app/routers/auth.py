@@ -54,8 +54,13 @@ def get_me(current_user: Usuario = Depends(get_current_user)) -> UserResponse:
     "/logout",
     response_model=MessageResponse,
     status_code=status.HTTP_200_OK,
-    summary="Cerrar sesión",
-    description="Invalida la sesión del lado del cliente y confirma el cierre de sesión seguro.",
+    summary="Cerrar sesión (Stateless JWT)",
+    description=(
+        "Endpoint de acuse de recibo para cierre de sesión bajo arquitectura JWT stateless. "
+        "El backend no mantiene lista negra (blacklist) ni revocación de tokens en servidor; "
+        "la terminación efectiva de la sesión se realiza en el cliente al descartar el token "
+        "de acceso de su almacenamiento local."
+    ),
 )
 def logout(current_user: Usuario = Depends(get_current_user)) -> MessageResponse:
     return MessageResponse(message="Sesión cerrada correctamente.")
