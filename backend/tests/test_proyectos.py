@@ -327,3 +327,179 @@ def test_proyecto_inexistente_retorna_404(tokens):
     res = client.get("/api/proyectos/999999", headers=headers)
     assert res.status_code == 404
     assert "no encontrado" in res.json()["detail"].lower()
+
+
+def test_regresion_estados_colaborador_y_permiso_edicion(tokens):
+    """
+    Prueba de regresión específica:
+    - Colaborador activo/aceptado puede listar y consultar el proyecto.
+    - Colaborador activo recibe permiso_edicion según lo configurado.
+    - Colaborador revocado NO puede listar el proyecto.
+    - Colaborador revocado NO puede consultar el proyecto (403 Forbidden).
+    - Colaborador revocado NO puede listar colaboradores (403 Forbidden).
+    - Propietario continúa teniendo acceso completo al proyecto.
+    - Usuario ajeno continúa bloqueado (403 Forbidden).
+    """
+    headers_carlos = {"Authorization": f"Bearer {tokens['carlos']}"}
+    headers_ana = {"Authorization": f"Bearer {tokens['ana']}"}
+    headers_luis = {"Authorization": f"Bearer {tokens['luis']}"}
+
+    # 1. Propietario (Carlos) crea proyecto
+    res_crear = client.post(
+        "/api/proyectos",
+        json={"nombre": "[TEST-REGRESION] Proyecto Autorizacion", "descripcion": "Test estados"},
+        headers=headers_carlos,
+    )
+    assert res_crear.status_code == 201
+    proj_id = res_crear.json()["id_proyecto"]
+    assert res_crear.json()["es_propietario"] is True
+    assert res_crear.json()["permiso_edicion"] is True
+
+    # 2. Carlos invita a Ana con permiso_edicion=True (estado='aceptado')
+    res_inv = client.post(
+        f"/api/proyectos/{proj_id}/colaboradores",
+        json={"email": "ana@classflow.com", "permiso_edicion": True},
+        headers=headers_carlos,
+    )
+    assert res_inv.status_code == 201
+    colab_id = res_inv.json()["id_colaborador"]
+    assert res_inv.json()["estado"] == "aceptado"
+
+    # 3. Ana (colaborador activo/aceptado) puede listar el proyecto en tipo=guest y tipo=all
+    res_guest = client.get("/api/proyectos?tipo=guest", headers=headers_ana)
+    assert res_guest.status_code == 200
+    assert any(p["id_proyecto"] == proj_id for p in res_guest.json())
+
+    res_all = client.get("/api/proyectos?tipo=all", headers=headers_ana)
+    assert res_all.status_code == 200
+    assert any(p["id_proyecto"] == proj_id for p in res_all.json())
+
+    # 4. Ana (colaborador activo/aceptado) puede consultar el proyecto con permiso_edicion=True
+    res_ana_proj = client.get(f"/api/proyectos/{proj_id}", headers=headers_ana)
+    assert res_ana_proj.status_code == 200
+    assert res_ana_proj.json()["permiso_edicion"] is True
+    assert res_ana_proj.json()["es_propietario"] is False
+
+    # 5. Carlos revoca a Ana
+    res_rev = client.delete(
+        f"/api/proyectos/{proj_id}/colaboradores/{colab_id}",
+        headers=headers_carlos,
+    )
+    assert res_rev.status_code == 200
+
+    # 6. Ana (colaborador revocado) NO puede listar el proyecto
+    res_guest_after = client.get("/api/proyectos?tipo=guest", headers=headers_ana)
+    assert not any(p["id_proyecto"] == proj_id for p in res_guest_after.json())
+
+    res_all_after = client.get("/api/proyectos?tipo=all", headers=headers_ana)
+    assert not any(p["id_proyecto"] == proj_id for p in res_all_after.json())
+
+    # 7. Ana (colaborador revocado) NO puede consultar el proyecto directamente (403)
+    res_ana_get_revoked = client.get(f"/api/proyectos/{proj_id}", headers=headers_ana)
+    assert res_ana_get_revoked.status_code == 403
+    assert "permiso" in res_ana_get_revoked.json()["detail"].lower()
+
+    # 8. Ana (colaborador revocado) NO puede ver colaboradores del proyecto (403)
+    res_ana_colabs_revoked = client.get(f"/api/proyectos/{proj_id}/colaboradores", headers=headers_ana)
+    assert res_ana_colabs_revoked.status_code == 403
+
+    # 9. Usuario ajeno (Luis) continúa bloqueado (403) y no aparece en su lista
+    res_luis_get = client.get(f"/api/proyectos/{proj_id}", headers=headers_luis)
+    assert res_luis_get.status_code == 403
+    res_luis_list = client.get("/api/proyectos?tipo=all", headers=headers_luis)
+    assert not any(p["id_proyecto"] == proj_id for p in res_luis_list.json())
+
+    # 10. Propietario (Carlos) continúa teniendo acceso pleno
+    res_carlos_get = client.get(f"/api/proyectos/{proj_id}", headers=headers_carlos)
+    assert res_carlos_get.status_code == 200
+    assert res_carlos_get.json()["es_propietario"] is True
+    assert res_carlos_get.json()["permiso_edicion"] is True
+    # Ana ya no aparece en colaboradores activos
+    assert not any(c["id_colaborador"] == colab_id for c in res_carlos_get.json()["colaboradores"])
+
+
+def test_colaborador_pendiente_no_obtiene_acceso(tokens):
+    """
+    Verifica que un colaborador con estado 'pendiente' NO obtiene acceso
+    al proyecto (ni listado, ni consulta individual /api/proyectos/{id}, ni colaboradores).
+    """
+    headers_carlos = {"Authorization": f"Bearer {tokens['carlos']}"}
+    headers_luis = {"Authorization": f"Bearer {tokens['luis']}"}
+
+    # Carlos crea proyecto
+    res_crear = client.post(
+        "/api/proyectos",
+        json={"nombre": "[TEST-PENDIENTE] Proyecto Con Invitacion Pendiente", "descripcion": "Pendiente test"},
+        headers=headers_carlos,
+    )
+    assert res_crear.status_code == 201
+    proj_id = res_crear.json()["id_proyecto"]
+
+    # Insertamos un registro con estado='pendiente' directamente en la BD
+    db = SessionLocal()
+    try:
+        from datetime import datetime
+        colab_pendiente = ProyectoColaborador(
+            id_proyecto=proj_id,
+            id_usuario=tokens["luis_user"]["id_usuario"],
+            permiso_edicion=True,
+            estado="pendiente",
+            fecha_invitacion=datetime.now(),
+            fecha_aceptacion=None,
+        )
+        db.add(colab_pendiente)
+        db.commit()
+    finally:
+        db.close()
+
+    # Luis (pendiente) intenta consultar directamente /api/proyectos/{id} -> 403 Forbidden
+    res_get = client.get(f"/api/proyectos/{proj_id}", headers=headers_luis)
+    assert res_get.status_code == 403
+    assert "permiso" in res_get.json()["detail"].lower()
+
+    # Luis no debe ver el proyecto en su lista (guest ni all)
+    res_guest = client.get("/api/proyectos?tipo=guest", headers=headers_luis)
+    assert not any(p["id_proyecto"] == proj_id for p in res_guest.json())
+
+    res_all = client.get("/api/proyectos?tipo=all", headers=headers_luis)
+    assert not any(p["id_proyecto"] == proj_id for p in res_all.json())
+
+    # Luis no puede consultar los colaboradores del proyecto -> 403 Forbidden
+    res_colabs = client.get(f"/api/proyectos/{proj_id}/colaboradores", headers=headers_luis)
+    assert res_colabs.status_code == 403
+
+
+def test_colaborador_solo_lectura_permiso_edicion_false(tokens):
+    """
+    Verifica que un colaborador con permiso_edicion=False recibe permiso_edicion=False
+    en la respuesta de /api/proyectos/{id} y en la lista de proyectos.
+    """
+    headers_carlos = {"Authorization": f"Bearer {tokens['carlos']}"}
+    headers_ana = {"Authorization": f"Bearer {tokens['ana']}"}
+
+    res_crear = client.post(
+        "/api/proyectos",
+        json={"nombre": "[TEST-RO] Proyecto Solo Lectura", "descripcion": "RO test"},
+        headers=headers_carlos,
+    )
+    assert res_crear.status_code == 201
+    proj_id = res_crear.json()["id_proyecto"]
+
+    # Invitar a Ana con permiso_edicion=False
+    client.post(
+        f"/api/proyectos/{proj_id}/colaboradores",
+        json={"email": "ana@classflow.com", "permiso_edicion": False},
+        headers=headers_carlos,
+    )
+
+    # Ana consulta el proyecto -> permiso_edicion es False
+    res_proj = client.get(f"/api/proyectos/{proj_id}", headers=headers_ana)
+    assert res_proj.status_code == 200
+    assert res_proj.json()["permiso_edicion"] is False
+
+    # En la lista de proyectos compartidos de Ana -> permiso_edicion es False
+    res_list = client.get("/api/proyectos?tipo=guest", headers=headers_ana)
+    assert res_list.status_code == 200
+    ana_p = next(p for p in res_list.json() if p["id_proyecto"] == proj_id)
+    assert ana_p["permiso_edicion"] is False
+

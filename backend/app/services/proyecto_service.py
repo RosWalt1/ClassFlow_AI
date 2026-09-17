@@ -18,6 +18,10 @@ from app.schemas.proyecto import (
 )
 
 
+# Estados de colaboración que otorgan acceso efectivo a los proyectos según CU02
+ESTADOS_COLABORADOR_ACTIVO = ("activo", "aceptado")
+
+
 class ProyectoService:
     @staticmethod
     def _to_colaborador_response(colab: ProyectoColaborador) -> ColaboradorResponse:
@@ -44,24 +48,25 @@ class ProyectoService:
 
         permiso_edicion = True
         if not es_propietario:
-            # Check collaborator permission
+            # Check collaborator permission ONLY for active authorized collaborations
             colab = (
                 db.query(ProyectoColaborador)
                 .filter(
                     ProyectoColaborador.id_proyecto == proyecto.id_proyecto,
                     ProyectoColaborador.id_usuario == current_user_id,
+                    ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
                 )
                 .first()
             )
             permiso_edicion = colab.permiso_edicion if colab else False
 
-        # Load active collaborators
+        # Load active collaborators (only states that grant active collaboration)
         colabs = (
             db.query(ProyectoColaborador)
             .options(joinedload(ProyectoColaborador.usuario))
             .filter(
                 ProyectoColaborador.id_proyecto == proyecto.id_proyecto,
-                ProyectoColaborador.estado.in_(["activo", "aceptado", "pendiente"]),
+                ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
             )
             .all()
         )
@@ -156,7 +161,7 @@ class ProyectoService:
                 select(ProyectoColaborador.id_proyecto)
                 .filter(
                     ProyectoColaborador.id_usuario == current_user_id,
-                    ProyectoColaborador.estado.in_(["activo", "aceptado"]),
+                    ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
                 )
             )
             query = query.filter(
@@ -170,7 +175,7 @@ class ProyectoService:
                 select(ProyectoColaborador.id_proyecto)
                 .filter(
                     ProyectoColaborador.id_usuario == current_user_id,
-                    ProyectoColaborador.estado.in_(["activo", "aceptado"]),
+                    ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
                 )
             )
             query = query.filter(
@@ -212,7 +217,7 @@ class ProyectoService:
                 .filter(
                     ProyectoColaborador.id_proyecto == proyecto_id,
                     ProyectoColaborador.id_usuario == current_user_id,
-                    ProyectoColaborador.estado.in_(["activo", "aceptado", "pendiente"]),
+                    ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
                 )
                 .first()
             )
@@ -392,12 +397,12 @@ class ProyectoService:
 
         now = datetime.now()
         if existing_colab:
-            if existing_colab.estado in ["activo", "aceptado", "pendiente"]:
+            if existing_colab.estado in ESTADOS_COLABORADOR_ACTIVO:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"El usuario '{target_user.nombre}' ya es colaborador de este proyecto.",
                 )
-            # Si estaba revocado o rechazado, reactivar
+            # Si estaba revocado, rechazado o inactivo, reactivar
             existing_colab.estado = "aceptado"
             existing_colab.permiso_edicion = data.permiso_edicion
             existing_colab.fecha_invitacion = now
@@ -446,7 +451,7 @@ class ProyectoService:
                 .filter(
                     ProyectoColaborador.id_proyecto == proyecto_id,
                     ProyectoColaborador.id_usuario == current_user_id,
-                    ProyectoColaborador.estado.in_(["activo", "aceptado", "pendiente"]),
+                    ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
                 )
                 .first()
             )
@@ -461,7 +466,7 @@ class ProyectoService:
             .options(joinedload(ProyectoColaborador.usuario))
             .filter(
                 ProyectoColaborador.id_proyecto == proyecto_id,
-                ProyectoColaborador.estado.in_(["activo", "aceptado", "pendiente"]),
+                ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
             )
             .all()
         )
@@ -506,7 +511,7 @@ class ProyectoService:
             )
             .first()
         )
-        if not colab or colab.estado not in ["activo", "aceptado", "pendiente"]:
+        if not colab or colab.estado not in ESTADOS_COLABORADOR_ACTIVO:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Colaborador no encontrado en este proyecto.",
@@ -550,13 +555,13 @@ class ProyectoService:
             )
             .first()
         )
-        if not colab:
+        if not colab or colab.estado not in ESTADOS_COLABORADOR_ACTIVO:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Colaborador no encontrado en este proyecto.",
             )
 
-        db.delete(colab)
+        colab.estado = "revocado"
         db.commit()
         return {
             "message": "Colaborador revocado correctamente.",
