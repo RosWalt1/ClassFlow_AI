@@ -1,5 +1,13 @@
 from .health import HealthResponse, DatabaseHealth
 from .auth import LoginRequest, TokenResponse, UserResponse, MessageResponse
+from .proyecto import (
+    ProyectoCreate,
+    ProyectoUpdate,
+    ProyectoResponse,
+    ColaboradorCreate,
+    ColaboradorUpdate,
+    ColaboradorResponse,
+)
 
 __all__ = [
     "HealthResponse",
@@ -8,4 +16,10 @@ __all__ = [
     "TokenResponse",
     "UserResponse",
     "MessageResponse",
+    "ProyectoCreate",
+    "ProyectoUpdate",
+    "ProyectoResponse",
+    "ColaboradorCreate",
+    "ColaboradorUpdate",
+    "ColaboradorResponse",
 ]

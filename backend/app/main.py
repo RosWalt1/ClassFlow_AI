@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.database.session import check_db_connection
 from app.routers.health import router as health_router
 from app.routers.auth import router as auth_router
+from app.routers.proyectos import router as proyectos_router
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +53,7 @@ app.add_middleware(
 # Include Routers
 app.include_router(health_router, prefix=settings.API_V1_PREFIX)
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
+app.include_router(proyectos_router, prefix=settings.API_V1_PREFIX)
 # Also include /health at root for orchestrator convenience
 app.include_router(health_router)
 
