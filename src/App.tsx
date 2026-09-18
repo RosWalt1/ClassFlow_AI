@@ -98,19 +98,21 @@ export default function App() {
           : ASSETS.anaLopez,
         permissionsBadge: authUser.email.toLowerCase().includes('carlos')
           ? 'Full Control • Propietario'
-          : 'Lectura / Edición UML • Invitado',
+          : 'Desarrollador Invitado',
       }
     : MOCK_USERS['carlos'];
 
-  const handleSwitchUser = (userKey: 'carlos' | 'ana') => {
-    // For manual switching in UI mock parts
-    const mock = MOCK_USERS[userKey];
-    if (authUser) {
-      setAuthUser({
-        ...authUser,
-        nombre: mock.name,
-        email: mock.email,
-      });
+  const handleSwitchUser = async (userKey: 'carlos' | 'ana') => {
+    const creds =
+      userKey === 'carlos'
+        ? { email: 'carlos@classflow.com', password: 'ClassFlow2026!' }
+        : { email: 'ana@classflow.com', password: 'ClassFlow2026!' };
+    try {
+      const res = await authService.login(creds.email, creds.password);
+      setAuthUser(res.user);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error al cambiar usuario:', err);
     }
   };
 

@@ -945,3 +945,209 @@ def test_verificar_los_seis_tipos_oficiales_y_rechazo_invalidos(tokens):
     for rel in diag_check["relaciones"]:
         assert rel["tipo"] in tipos_oficiales
         assert rel["tipo"] not in tipos_ingleses
+
+
+def test_permisos_edicion_exhaustivo_colaborador(tokens):
+    """
+    Prueba exhaustiva de los escenarios A-G de autorización de edición:
+    A) Propietario puede mutar
+    B) Colaborador permiso_edicion=true puede mutar
+    C) Colaborador permiso_edicion=false puede leer
+    D) Colaborador permiso_edicion=false recibe 403 al crear clase
+    E) Recibe 403 al editar/eliminar elementos UML (clases, atributos, métodos, parámetros, relaciones)
+    F) Cambiar permiso true -> false y false -> true tiene efecto real e inmediato
+    G) Colaborador read-only todavía puede conectarse al WebSocket CU04 y recibir diagram.changed
+    """
+    headers_carlos = {"Authorization": f"Bearer {tokens['carlos']}"}
+    headers_ana = {"Authorization": f"Bearer {tokens['ana']}"}
+
+    # 1. Carlos crea proyecto
+    res_p = client.post(
+        "/api/proyectos",
+        json={"nombre": "[TEST-PERMISOS-CU03] Proyecto Control Estricto", "descripcion": "Testing permisos"},
+        headers=headers_carlos,
+    )
+    assert res_p.status_code == 201
+    proj_id = res_p.json()["id_proyecto"]
+
+    # Carlos obtiene diagrama
+    diag_carlos = client.get(f"/api/proyectos/{proj_id}/diagrama", headers=headers_carlos).json()
+    diag_id = diag_carlos["id_diagrama"]
+
+    # [Escenario A] Propietario Carlos puede mutar todos los elementos
+    res_c1 = client.post(
+        f"/api/diagramas/{diag_id}/clases",
+        json={"nombre": "ClaseA", "posicion_x": 100, "posicion_y": 100},
+        headers=headers_carlos,
+    )
+    assert res_c1.status_code == 201
+    c1_id = res_c1.json()["id_clase"]
+
+    res_c2 = client.post(
+        f"/api/diagramas/{diag_id}/clases",
+        json={"nombre": "ClaseB", "posicion_x": 300, "posicion_y": 100},
+        headers=headers_carlos,
+    )
+    assert res_c2.status_code == 201
+    c2_id = res_c2.json()["id_clase"]
+
+    res_attr = client.post(
+        f"/api/clases/{c1_id}/atributos",
+        json={"nombre": "nombre", "tipo_dato": "String", "visibilidad": "private"},
+        headers=headers_carlos,
+    )
+    assert res_attr.status_code == 201
+    attr_id = res_attr.json()["id_atributo"]
+
+    res_met = client.post(
+        f"/api/clases/{c1_id}/metodos",
+        json={"nombre": "calcularTotal", "tipo_retorno": "BigDecimal", "visibilidad": "public"},
+        headers=headers_carlos,
+    )
+    assert res_met.status_code == 201
+    met_id = res_met.json()["id_metodo"]
+
+    res_param = client.post(
+        f"/api/metodos/{met_id}/parametros",
+        json={"nombre": "cantidad", "tipo_dato": "Integer", "orden": 1},
+        headers=headers_carlos,
+    )
+    assert res_param.status_code == 201
+    param_id = res_param.json()["id_parametro"]
+
+    res_rel = client.post(
+        f"/api/diagramas/{diag_id}/relaciones",
+        json={"id_clase_origen": c1_id, "id_clase_destino": c2_id, "tipo": "asociacion"},
+        headers=headers_carlos,
+    )
+    assert res_rel.status_code == 201
+    rel_id = res_rel.json()["id_relacion"]
+
+    # 2. Carlos invita a Ana con permiso_edicion=True
+    res_inv = client.post(
+        f"/api/proyectos/{proj_id}/colaboradores",
+        json={"email": "ana@classflow.com", "permiso_edicion": True},
+        headers=headers_carlos,
+    )
+    assert res_inv.status_code == 201
+    colab_ana_id = res_inv.json()["id_colaborador"]
+
+    # [Escenario B] Colaborador con permiso_edicion=True puede mutar
+    res_ana_diag = client.get(f"/api/proyectos/{proj_id}/diagrama", headers=headers_ana)
+    assert res_ana_diag.status_code == 200
+    assert res_ana_diag.json()["permiso_edicion"] is True
+
+    # Ana agrega atributo
+    res_ana_attr = client.post(
+        f"/api/clases/{c1_id}/atributos",
+        json={"nombre": "activo", "tipo_dato": "Boolean", "visibilidad": "private"},
+        headers=headers_ana,
+    )
+    assert res_ana_attr.status_code == 201
+
+    # Ana edita método
+    res_ana_met = client.put(
+        f"/api/metodos/{met_id}",
+        json={"es_estatico": True, "tipo_retorno": "BigDecimal"},
+        headers=headers_ana,
+    )
+    assert res_ana_met.status_code == 200
+    assert res_ana_met.json()["es_estatico"] is True
+
+    # 3. [Escenario F] Carlos cambia permiso de Ana a false
+    res_revoke = client.patch(
+        f"/api/proyectos/{proj_id}/colaboradores/{colab_ana_id}",
+        json={"permiso_edicion": False},
+        headers=headers_carlos,
+    )
+    assert res_revoke.status_code == 200
+    assert res_revoke.json()["permiso_edicion"] is False
+
+    # [Escenario C] Colaborador permiso_edicion=false puede leer
+    res_ana_ro = client.get(f"/api/proyectos/{proj_id}/diagrama", headers=headers_ana)
+    assert res_ana_ro.status_code == 200
+    assert res_ana_ro.json()["permiso_edicion"] is False
+
+    # [Escenario D] Recibe 403 al intentar crear clase
+    res_ro_crear_clase = client.post(
+        f"/api/diagramas/{diag_id}/clases",
+        json={"nombre": "ClaseProhibida", "posicion_x": 500, "posicion_y": 500},
+        headers=headers_ana,
+    )
+    assert res_ro_crear_clase.status_code == 403
+
+    # [Escenario E] Recibe 403 en todas las demás mutaciones UML
+    # E.1 Actualizar clase
+    assert client.put(f"/api/diagramas/{diag_id}/clases/{c1_id}", json={"nombre": "Hacked"}, headers=headers_ana).status_code == 403
+    # E.2 Mover posición de clase
+    assert client.patch(f"/api/diagramas/{diag_id}/clases/{c1_id}/posicion", json={"posicion_x": 999, "posicion_y": 999}, headers=headers_ana).status_code == 403
+    # E.3 Eliminar clase
+    assert client.delete(f"/api/diagramas/{diag_id}/clases/{c2_id}", headers=headers_ana).status_code == 403
+
+    # E.4 Crear atributo
+    assert client.post(f"/api/clases/{c1_id}/atributos", json={"nombre": "bad", "tipo_dato": "int"}, headers=headers_ana).status_code == 403
+    # E.5 Modificar atributo
+    assert client.put(f"/api/atributos/{attr_id}", json={"nombre": "mod"}, headers=headers_ana).status_code == 403
+    # E.6 Eliminar atributo
+    assert client.delete(f"/api/atributos/{attr_id}", headers=headers_ana).status_code == 403
+
+    # E.7 Crear método
+    assert client.post(f"/api/clases/{c1_id}/metodos", json={"nombre": "badMetodo"}, headers=headers_ana).status_code == 403
+    # E.8 Modificar método
+    assert client.put(f"/api/metodos/{met_id}", json={"nombre": "modMetodo"}, headers=headers_ana).status_code == 403
+    # E.9 Eliminar método
+    assert client.delete(f"/api/metodos/{met_id}", headers=headers_ana).status_code == 403
+
+    # E.10 Crear parámetro
+    assert client.post(f"/api/metodos/{met_id}/parametros", json={"nombre": "p2", "tipo_dato": "String"}, headers=headers_ana).status_code == 403
+    # E.11 Modificar parámetro
+    assert client.put(f"/api/parametros/{param_id}", json={"nombre": "pMod"}, headers=headers_ana).status_code == 403
+    # E.12 Eliminar parámetro
+    assert client.delete(f"/api/parametros/{param_id}", headers=headers_ana).status_code == 403
+
+    # E.13 Crear relación
+    assert client.post(f"/api/diagramas/{diag_id}/relaciones", json={"id_clase_origen": c1_id, "id_clase_destino": c2_id, "tipo": "dependencia"}, headers=headers_ana).status_code == 403
+    # E.14 Modificar relación
+    assert client.put(f"/api/relaciones/{rel_id}", json={"tipo": "composicion"}, headers=headers_ana).status_code == 403
+    # E.15 Eliminar relación
+    assert client.delete(f"/api/relaciones/{rel_id}", headers=headers_ana).status_code == 403
+
+    # [Escenario G] Colaborador read-only todavía puede conectarse a WebSocket CU04 y recibir cambios
+    with client.websocket_connect(f"/api/ws/diagramas/{diag_id}?token={tokens['ana']}") as ws_ana:
+        init_msg = ws_ana.receive_json()
+        assert init_msg["type"] == "session.init"
+        assert init_msg["user"]["permiso_edicion"] is False
+
+        # Carlos hace una mutación
+        res_mut = client.post(
+            f"/api/clases/{c2_id}/atributos",
+            json={"nombre": "codigo", "tipo_dato": "String", "visibilidad": "public"},
+            headers=headers_carlos,
+        )
+        assert res_mut.status_code == 201
+
+        # Ana recibe diagram.changed en tiempo real sin desconectarse
+        event = ws_ana.receive_json()
+        assert event["type"] == "diagram.changed"
+        assert event["diagram_id"] == diag_id
+
+    # [Escenario F.2] Carlos vuelve a conceder permiso_edicion=True
+    res_restore = client.patch(
+        f"/api/proyectos/{proj_id}/colaboradores/{colab_ana_id}",
+        json={"permiso_edicion": True},
+        headers=headers_carlos,
+    )
+    assert res_restore.status_code == 200
+    assert res_restore.json()["permiso_edicion"] is True
+
+    # Ana vuelve a consultar y ahora sí puede mutar
+    res_ana_ed = client.get(f"/api/proyectos/{proj_id}/diagrama", headers=headers_ana)
+    assert res_ana_ed.json()["permiso_edicion"] is True
+
+    res_ana_crea_ok = client.post(
+        f"/api/diagramas/{diag_id}/clases",
+        json={"nombre": "ClaseAnaRestaurada", "posicion_x": 250, "posicion_y": 250},
+        headers=headers_ana,
+    )
+    assert res_ana_crea_ok.status_code == 201
+

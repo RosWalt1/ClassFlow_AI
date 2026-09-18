@@ -56,6 +56,7 @@ class ProyectoService:
                     ProyectoColaborador.id_usuario == current_user_id,
                     ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
                 )
+                .order_by(ProyectoColaborador.id_colaborador.desc())
                 .first()
             )
             permiso_edicion = colab.permiso_edicion if colab else False
@@ -520,6 +521,14 @@ class ProyectoService:
         colab.permiso_edicion = data.permiso_edicion
         db.commit()
         db.refresh(colab)
+
+        # Notificar en tiempo real a salas de diagramas del proyecto
+        from app.models.diagrama import Diagrama
+        from app.services.diagrama_service import DiagramaService
+        diagramas_proj = db.query(Diagrama).filter(Diagrama.id_proyecto == proyecto_id).all()
+        for diag in diagramas_proj:
+            DiagramaService._notify_diagram_changed(diag.id_diagrama, current_user_id)
+
         return cls._to_colaborador_response(colab)
 
     @classmethod

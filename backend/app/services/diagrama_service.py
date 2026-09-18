@@ -63,6 +63,7 @@ class DiagramaService:
                 ProyectoColaborador.id_usuario == user_id,
                 ProyectoColaborador.estado.in_(ESTADOS_COLABORADOR_ACTIVO),
             )
+            .order_by(ProyectoColaborador.id_colaborador.desc())
             .first()
         )
         if not colab:

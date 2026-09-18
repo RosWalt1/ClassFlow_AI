@@ -74,8 +74,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<'general' | 'atributos' | 'metodos'>('atributos');
 
-  // Selected attribute for editing in Inspector
+  // Selected attribute / method for editing in Inspector
   const [editingAttrId, setEditingAttrId] = useState<string>('');
+  const [editingMethodId, setEditingMethodId] = useState<string>('');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
   // Dragging state for nodes on canvas
@@ -151,6 +152,16 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       name: m.nombre,
       returnType: m.tipo_retorno || 'void',
       params: (m.parametros || []).map((p) => `${p.nombre}: ${p.tipo_dato}`).join(', '),
+      isStatic: m.es_estatico,
+      isAbstract: m.es_abstracto,
+      order: m.orden,
+      parametersList: (m.parametros || []).map((p) => ({
+        id: p.id_parametro.toString(),
+        name: p.nombre,
+        type: p.tipo_dato,
+        defaultValue: p.valor_defecto || undefined,
+        order: p.orden,
+      })),
     })),
   });
 
@@ -239,6 +250,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       if (!diagrama?.id_diagrama) return;
       try {
         const fullDiagram = await diagramaService.getDiagrama(diagrama.id_diagrama);
+        setDiagrama(fullDiagram);
         const mappedClasses = (fullDiagram.clases || []).map(mapApiClassToNode);
         const mappedRelations = (fullDiagram.relaciones || []).map(mapApiRelToUml);
         setClasses(mappedClasses);
@@ -259,8 +271,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       if (e.active_participants) {
         setActiveParticipants(e.active_participants);
       }
-      if (e.session_code) {
-        setSessionCode(e.session_code);
+      if (e.codigo_sesion || e.session_code) {
+        setSessionCode(e.codigo_sesion || e.session_code);
+      }
+      if (e.user && typeof e.user.permiso_edicion === 'boolean') {
+        setDiagrama((prev) => (prev ? { ...prev, permiso_edicion: e.user.permiso_edicion } : prev));
       }
     });
 
@@ -605,6 +620,8 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
         nombre: `operacion${nextCount}`,
         tipo_retorno: 'void',
         visibilidad: 'public',
+        es_estatico: false,
+        es_abstracto: false,
         orden: nextCount,
       });
 
@@ -612,7 +629,12 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
         id: created.id_metodo.toString(),
         visibility: toVisChar(created.visibilidad),
         name: created.nombre,
-        returnType: created.tipo_retorno,
+        returnType: created.tipo_retorno || 'void',
+        params: '',
+        isStatic: created.es_estatico,
+        isAbstract: created.es_abstracto,
+        order: created.orden,
+        parametersList: [],
       };
 
       setClasses((prev) =>
@@ -620,6 +642,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           cls.id === selectedClass.id ? { ...cls, methods: [...cls.methods, newMethod] } : cls
         )
       );
+      setEditingMethodId(newMethod.id);
       setSaveStatus('guardado');
     } catch (err: any) {
       alert(`Error al agregar método: ${err.message}`);
@@ -627,23 +650,47 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     }
   };
 
-  const handleEditMethodName = async (methodId: string, oldName: string) => {
+  const handleUpdateMethod = async (
+    methodId: string,
+    data: {
+      name?: string;
+      returnType?: string;
+      visibility?: '-' | '+' | '#' | '~';
+      isStatic?: boolean;
+      isAbstract?: boolean;
+      order?: number;
+    }
+  ) => {
     if (!diagrama || !canEdit || !selectedClass) return;
-    const newName = prompt('Nombre del método / operación:', oldName);
-    if (!newName || !newName.trim()) return;
-
     try {
       setSaveStatus('guardando');
-      await diagramaService.updateMetodo(parseInt(methodId, 10), {
-        nombre: newName.trim(),
-      });
+      const payload: any = {};
+      if (data.name !== undefined) payload.nombre = data.name;
+      if (data.returnType !== undefined) payload.tipo_retorno = data.returnType;
+      if (data.visibility !== undefined) payload.visibilidad = toVisWord(data.visibility);
+      if (data.isStatic !== undefined) payload.es_estatico = data.isStatic;
+      if (data.isAbstract !== undefined) payload.es_abstracto = data.isAbstract;
+      if (data.order !== undefined) payload.orden = data.order;
+
+      await diagramaService.updateMetodo(parseInt(methodId, 10), payload);
+
       setClasses((prev) =>
         prev.map((cls) =>
           cls.id === selectedClass.id
             ? {
                 ...cls,
                 methods: cls.methods.map((m) =>
-                  m.id === methodId ? { ...m, name: newName.trim() } : m
+                  m.id === methodId
+                    ? {
+                        ...m,
+                        ...(data.name !== undefined ? { name: data.name } : {}),
+                        ...(data.returnType !== undefined ? { returnType: data.returnType } : {}),
+                        ...(data.visibility !== undefined ? { visibility: data.visibility } : {}),
+                        ...(data.isStatic !== undefined ? { isStatic: data.isStatic } : {}),
+                        ...(data.isAbstract !== undefined ? { isAbstract: data.isAbstract } : {}),
+                        ...(data.order !== undefined ? { order: data.order } : {}),
+                      }
+                    : m
                 ),
               }
             : cls
@@ -652,6 +699,141 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       setSaveStatus('guardado');
     } catch (err: any) {
       alert(`Error al actualizar método: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleAddParametro = async (methodId: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    const targetMethod = selectedClass.methods.find((m) => m.id === methodId);
+    const nextOrder = (targetMethod?.parametersList?.length || 0) + 1;
+    const proposedName = prompt('Nombre del nuevo parámetro:', `p${nextOrder}`);
+    if (!proposedName || !proposedName.trim()) return;
+
+    try {
+      setSaveStatus('guardando');
+      const created = await diagramaService.createParametro(parseInt(methodId, 10), {
+        nombre: proposedName.trim(),
+        tipo_dato: 'String',
+        orden: nextOrder,
+      });
+
+      const newParam = {
+        id: created.id_parametro.toString(),
+        name: created.nombre,
+        type: created.tipo_dato,
+        order: created.orden,
+        defaultValue: created.valor_defecto || undefined,
+      };
+
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id
+            ? {
+                ...cls,
+                methods: cls.methods.map((m) => {
+                  if (m.id === methodId) {
+                    const updatedParams = [...(m.parametersList || []), newParam];
+                    const paramsStr = updatedParams.map((p) => `${p.name}: ${p.type}`).join(', ');
+                    return {
+                      ...m,
+                      parametersList: updatedParams,
+                      params: paramsStr,
+                    };
+                  }
+                  return m;
+                }),
+              }
+            : cls
+        )
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al agregar parámetro: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleUpdateParametro = async (
+    methodId: string,
+    paramId: string,
+    data: { name?: string; type?: string }
+  ) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      const payload: any = {};
+      if (data.name !== undefined) payload.nombre = data.name;
+      if (data.type !== undefined) payload.tipo_dato = data.type;
+
+      await diagramaService.updateParametro(parseInt(paramId, 10), payload);
+
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id
+            ? {
+                ...cls,
+                methods: cls.methods.map((m) => {
+                  if (m.id === methodId) {
+                    const updatedParams = (m.parametersList || []).map((p) =>
+                      p.id === paramId
+                        ? {
+                            ...p,
+                            ...(data.name !== undefined ? { name: data.name } : {}),
+                            ...(data.type !== undefined ? { type: data.type } : {}),
+                          }
+                        : p
+                    );
+                    const paramsStr = updatedParams.map((p) => `${p.name}: ${p.type}`).join(', ');
+                    return {
+                      ...m,
+                      parametersList: updatedParams,
+                      params: paramsStr,
+                    };
+                  }
+                  return m;
+                }),
+              }
+            : cls
+        )
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al actualizar parámetro: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleDeleteParametro = async (methodId: string, paramId: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.deleteParametro(parseInt(paramId, 10));
+
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id
+            ? {
+                ...cls,
+                methods: cls.methods.map((m) => {
+                  if (m.id === methodId) {
+                    const updatedParams = (m.parametersList || []).filter((p) => p.id !== paramId);
+                    const paramsStr = updatedParams.map((p) => `${p.name}: ${p.type}`).join(', ');
+                    return {
+                      ...m,
+                      parametersList: updatedParams,
+                      params: paramsStr,
+                    };
+                  }
+                  return m;
+                }),
+              }
+            : cls
+        )
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al eliminar parámetro: ${err.message}`);
       setSaveStatus('error');
     }
   };
@@ -1734,44 +1916,234 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                     </div>
 
                     <div className="space-y-2">
-                      {selectedClass.methods.map((method) => (
-                        <div
-                          key={method.id}
-                          className="p-2.5 rounded-lg bg-surface-container flex items-center justify-between shadow-sm border border-outline-variant/10"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 flex items-center justify-center rounded bg-tertiary/20 text-tertiary font-bold font-mono text-xs">
-                              {method.visibility}
-                            </span>
-                            <div className="flex flex-col">
-                              <span className="font-mono text-xs text-on-surface font-semibold">
-                                {method.name}({method.params || ''})
-                              </span>
-                              <span className="font-mono text-[11px] text-outline">
-                                retorno: {method.returnType}
-                              </span>
+                      {selectedClass.methods.map((method) => {
+                        const isEditingThisMethod = editingMethodId === method.id;
+
+                        if (isEditingThisMethod && canEdit) {
+                          return (
+                            <div
+                              key={method.id}
+                              className="p-3 rounded-lg bg-surface-container-high shadow-md space-y-3 border border-tertiary/40"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-[16px] text-tertiary">
+                                    edit_note
+                                  </span>
+                                  <span className="text-xs font-medium text-tertiary">
+                                    Editando: {method.name}()
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMethodId('')}
+                                  className="text-outline hover:text-on-surface cursor-pointer"
+                                  title="Cerrar edición"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">close</span>
+                                </button>
+                              </div>
+
+                              {/* Form Grid: Visibilidad, Nombre */}
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="col-span-1">
+                                  <label className="text-[11px] text-outline block mb-1">Visibilidad</label>
+                                  <select
+                                    value={method.visibility}
+                                    onChange={(e) =>
+                                      handleUpdateMethod(method.id, {
+                                        visibility: e.target.value as any,
+                                      })
+                                    }
+                                    className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
+                                  >
+                                    <option value="+">+ (Public)</option>
+                                    <option value="-">- (Private)</option>
+                                    <option value="#"># (Protected)</option>
+                                    <option value="~">~ (Package)</option>
+                                  </select>
+                                </div>
+                                <div className="col-span-2">
+                                  <label className="text-[11px] text-outline block mb-1">Nombre</label>
+                                  <input
+                                    type="text"
+                                    value={method.name}
+                                    onChange={(e) =>
+                                      handleUpdateMethod(method.id, {
+                                        name: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
+                                  />
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] text-outline block mb-1">
+                                  Tipo de Retorno (Java / Spring)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={method.returnType}
+                                  placeholder="void, String, BigDecimal..."
+                                  onChange={(e) =>
+                                    handleUpdateMethod(method.id, {
+                                      returnType: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-surface-container-lowest text-primary font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-4 pt-1">
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={method.isStatic ?? false}
+                                    onChange={(e) =>
+                                      handleUpdateMethod(method.id, {
+                                        isStatic: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-primary rounded"
+                                  />
+                                  <span className="text-[11px] text-on-surface">Estático (static)</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={method.isAbstract ?? false}
+                                    onChange={(e) =>
+                                      handleUpdateMethod(method.id, {
+                                        isAbstract: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-primary rounded"
+                                  />
+                                  <span className="text-[11px] text-on-surface">Abstracto (abstract)</span>
+                                </label>
+                              </div>
+
+                              {/* PARÁMETROS SUB-SECTION */}
+                              <div className="pt-2 border-t border-outline-variant/20 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-semibold text-outline uppercase tracking-wider">
+                                    Parámetros ({method.parametersList?.length || 0})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddParametro(method.id)}
+                                    className="flex items-center gap-1 text-[11px] text-primary hover:text-primary-fixed font-medium cursor-pointer"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">add</span>
+                                    <span>Agregar parámetro</span>
+                                  </button>
+                                </div>
+
+                                {(!method.parametersList || method.parametersList.length === 0) ? (
+                                  <p className="text-[11px] text-outline italic">Sin parámetros (método sin argumentos).</p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {method.parametersList.map((param) => (
+                                      <div
+                                        key={param.id}
+                                        className="flex items-center gap-2 p-1.5 rounded bg-surface-container-lowest border border-outline-variant/20"
+                                      >
+                                        <input
+                                          type="text"
+                                          value={param.name}
+                                          placeholder="nombre"
+                                          onChange={(e) =>
+                                            handleUpdateParametro(method.id, param.id, { name: e.target.value })
+                                          }
+                                          className="w-1/2 bg-transparent text-on-surface font-mono text-[11px] p-1 rounded outline-none border border-outline-variant/20 focus:border-primary"
+                                        />
+                                        <span className="text-outline text-xs">:</span>
+                                        <input
+                                          type="text"
+                                          value={param.type}
+                                          placeholder="tipo (ej. Integer)"
+                                          onChange={(e) =>
+                                            handleUpdateParametro(method.id, param.id, { type: e.target.value })
+                                          }
+                                          className="w-1/2 bg-transparent text-primary font-mono text-[11px] p-1 rounded outline-none border border-outline-variant/20 focus:border-primary"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteParametro(method.id, param.id)}
+                                          className="p-1 text-error hover:bg-error/10 rounded cursor-pointer"
+                                          title="Eliminar parámetro"
+                                        >
+                                          <span className="material-symbols-outlined text-[14px]">delete</span>
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="pt-2 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMethodId('')}
+                                  className="px-3 py-1 rounded bg-surface-container hover:bg-surface-bright text-xs font-medium text-on-surface cursor-pointer"
+                                >
+                                  Listo
+                                </button>
+                              </div>
                             </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={method.id}
+                            className="p-2.5 rounded-lg bg-surface-container flex items-center justify-between shadow-sm border border-outline-variant/10 hover:border-outline-variant/30 transition-all"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 flex items-center justify-center rounded bg-tertiary/20 text-tertiary font-bold font-mono text-xs">
+                                {method.visibility}
+                              </span>
+                              <div className="flex flex-col">
+                                <span className="font-mono text-xs text-on-surface font-semibold">
+                                  {method.name}({method.params || ''})
+                                </span>
+                                <div className="flex items-center gap-2 font-mono text-[11px]">
+                                  <span className="text-secondary font-medium">: {method.returnType}</span>
+                                  {method.isStatic && (
+                                    <span className="px-1 py-0.2 rounded bg-surface-container-high text-[10px] text-primary font-sans">
+                                      static
+                                    </span>
+                                  )}
+                                  {method.isAbstract && (
+                                    <span className="px-1 py-0.2 rounded bg-surface-container-high text-[10px] text-tertiary font-sans italic">
+                                      abstract
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {canEdit && (
+                              <div className="flex items-center gap-1 text-on-surface-variant">
+                                <button
+                                  onClick={() => setEditingMethodId(method.id)}
+                                  className="p-1 hover:text-on-surface rounded hover:bg-surface-bright cursor-pointer"
+                                  title="Editar método y parámetros"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">edit</span>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteMethod(method.id)}
+                                  className="p-1 hover:text-error rounded hover:bg-surface-bright cursor-pointer"
+                                  title="Eliminar método"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">delete</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
-                          {canEdit && (
-                            <div className="flex items-center gap-1 text-on-surface-variant">
-                              <button
-                                onClick={() => handleEditMethodName(method.id, method.name)}
-                                className="p-1 hover:text-on-surface rounded hover:bg-surface-bright cursor-pointer"
-                                title="Editar nombre de método"
-                              >
-                                <span className="material-symbols-outlined text-[16px]">edit</span>
-                              </button>
-                              <button
-                                onClick={() => handleDeleteMethod(method.id)}
-                                className="p-1 hover:text-error rounded hover:bg-surface-bright cursor-pointer"
-                                title="Eliminar método"
-                              >
-                                <span className="material-symbols-outlined text-[16px]">delete</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

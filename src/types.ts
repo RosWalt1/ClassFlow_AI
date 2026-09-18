@@ -18,12 +18,24 @@ export interface UMLAttribute {
   isFinal?: boolean;
 }
 
+export interface UMLParametro {
+  id: string;
+  name: string;
+  type: string;
+  defaultValue?: string;
+  order?: number;
+}
+
 export interface UMLMethod {
   id: string;
   visibility: '-' | '+' | '#' | '~';
   name: string;
   returnType: string;
   params?: string;
+  isStatic?: boolean;
+  isAbstract?: boolean;
+  order?: number;
+  parametersList?: UMLParametro[];
 }
 
 export interface UMLClassNode {
