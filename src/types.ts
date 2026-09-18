@@ -42,7 +42,19 @@ export interface UMLRelation {
   id: string;
   sourceId: string;
   targetId: string;
-  type: 'association' | 'aggregation' | 'composition' | 'inheritance' | 'dependency';
+  type:
+    | 'association'
+    | 'aggregation'
+    | 'composition'
+    | 'inheritance'
+    | 'dependency'
+    | 'realization'
+    | 'asociacion'
+    | 'agregacion'
+    | 'composicion'
+    | 'herencia'
+    | 'dependencia'
+    | 'realizacion';
   sourceMultiplicity: string;
   targetMultiplicity: string;
   roleName?: string;

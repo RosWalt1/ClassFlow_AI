@@ -11,12 +11,14 @@ interface ProjectsScreenProps {
   onNavigate: (screen: AppScreen) => void;
   currentUser: UserProfile;
   initialFilter?: 'all' | 'owner' | 'guest';
+  onOpenProject?: (projectId: number) => void;
 }
 
 export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
   onNavigate,
   currentUser,
   initialFilter = 'all',
+  onOpenProject,
 }) => {
   const [projects, setProjects] = useState<ProyectoApiItem[]>([]);
   const [filterTab, setFilterTab] = useState<'all' | 'owner' | 'guest'>(initialFilter);
@@ -760,7 +762,17 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
                   {/* Card Actions */}
                   <div className="mt-4 pt-3 border-t border-outline-variant/15 flex items-center gap-2">
                     <button
-                      onClick={() => onNavigate('editor')}
+                      onClick={() => {
+                        try {
+                          localStorage.setItem('classflow_active_project_id', project.id_proyecto.toString());
+                        } catch {
+                          // ignore
+                        }
+                        if (onOpenProject) {
+                          onOpenProject(project.id_proyecto);
+                        }
+                        onNavigate('editor');
+                      }}
                       className="flex-1 py-2 px-3 rounded-lg bg-primary text-on-primary text-xs font-semibold text-center hover:bg-primary-fixed-dim transition-colors shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[18px]">terminal</span>

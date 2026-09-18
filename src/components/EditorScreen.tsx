@@ -1,33 +1,83 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AppScreen, UMLAttribute, UMLClassNode, UMLMethod, UMLRelation, UserProfile } from '../types';
-import { ASSETS, INITIAL_CLASSES, INITIAL_RELATIONS } from '../data/mockData';
+import { ASSETS } from '../data/mockData';
+import { diagramaService, DiagramaApiItem, ClaseApiItem, RelacionApiItem } from '../services/diagramaService';
+import { proyectoService } from '../services/proyectoService';
 
 interface EditorScreenProps {
   onNavigate: (screen: AppScreen) => void;
   currentUser: UserProfile;
+  projectId?: number | null;
 }
+
+// Visibilities conversion helpers
+const toVisChar = (vis: string): '-' | '+' | '#' | '~' => {
+  switch (vis) {
+    case 'public':
+      return '+';
+    case 'private':
+      return '-';
+    case 'protected':
+      return '#';
+    case 'package':
+      return '~';
+    default:
+      return '+';
+  }
+};
+
+const toVisWord = (char: '-' | '+' | '#' | '~'): string => {
+  switch (char) {
+    case '+':
+      return 'public';
+    case '-':
+      return 'private';
+    case '#':
+      return 'protected';
+    case '~':
+      return 'package';
+    default:
+      return 'public';
+  }
+};
 
 export const EditorScreen: React.FC<EditorScreenProps> = ({
   onNavigate,
   currentUser: _currentUser,
+  projectId: propProjectId,
 }) => {
-  // State for UML classes and relations
-  const [classes, setClasses] = useState<UMLClassNode[]>(INITIAL_CLASSES);
-  const [relations] = useState<UMLRelation[]>(INITIAL_RELATIONS);
-  const [selectedClassId, setSelectedClassId] = useState<string>('producto');
+  // Diagram & Project Data
+  const [diagrama, setDiagrama] = useState<DiagramaApiItem | null>(null);
+  const [projectName, setProjectName] = useState<string>('Proyecto');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'guardado' | 'guardando' | 'error'>('guardado');
+
+  // UML nodes and relations state
+  const [classes, setClasses] = useState<UMLClassNode[]>([]);
+  const [relations, setRelations] = useState<UMLRelation[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<'general' | 'atributos' | 'metodos'>('atributos');
-  
-  // Selected attribute for editing inside Inspector
-  const [editingAttrId, setEditingAttrId] = useState<string>('p3');
+
+  // Selected attribute for editing in Inspector
+  const [editingAttrId, setEditingAttrId] = useState<string>('');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
   // Dragging state for nodes on canvas
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // AI Assistant Chat & Voice state
+  // Modal to create Relation
+  const [isRelationModalOpen, setIsRelationModalOpen] = useState<boolean>(false);
+  const [relType, setRelType] = useState<string>('asociacion');
+  const [relTargetId, setRelTargetId] = useState<string>('');
+  const [relSourceMult, setRelSourceMult] = useState<string>('1');
+  const [relTargetMult, setRelTargetMult] = useState<string>('0..*');
+  const [relName, setRelName] = useState<string>('');
+
+  // AI Assistant Chat & Voice mock state (preserved for visual fidelity and future Phase 6)
   const [isAiCollapsed, setIsAiCollapsed] = useState<boolean>(false);
-  const [isListening, setIsListening] = useState<boolean>(true);
+  const [isListening, setIsListening] = useState<boolean>(false);
   const [aiInputText, setAiInputText] = useState<string>('');
   const [chatMessages, setChatMessages] = useState<
     { sender: 'user' | 'ai'; text: string; highlight?: string }[]
@@ -42,16 +92,122 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   ]);
 
   // Toast collaborator state
-  const [showCollabToast, setShowCollabToast] = useState<boolean>(true);
+  const [showCollabToast, setShowCollabToast] = useState<boolean>(false);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+
+  // Determine permissions
+  const canEdit = Boolean(diagrama?.permiso_edicion);
+
+  // Convert backend API class item to frontend UMLClassNode
+  const mapApiClassToNode = (c: ClaseApiItem): UMLClassNode => ({
+    id: c.id_clase.toString(),
+    name: c.nombre,
+    stereotype: c.estereotipo || '«entity»',
+    x: Number(c.posicion_x) || 100,
+    y: Number(c.posicion_y) || 100,
+    width: Number(c.ancho) || 260,
+    isConcrete: !c.es_abstracta,
+    attributes: (c.atributos || []).map((a) => ({
+      id: a.id_atributo.toString(),
+      visibility: toVisChar(a.visibilidad),
+      name: a.nombre,
+      type: a.tipo_dato,
+      isPk: a.nombre.toLowerCase() === 'id' || a.orden === 0,
+      isNullable: a.es_nullable,
+      isStatic: a.es_estatico,
+      isFinal: a.es_final,
+    })),
+    methods: (c.metodos || []).map((m) => ({
+      id: m.id_metodo.toString(),
+      visibility: toVisChar(m.visibilidad),
+      name: m.nombre,
+      returnType: m.tipo_retorno || 'void',
+      params: (m.parametros || []).map((p) => `${p.nombre}: ${p.tipo_dato}`).join(', '),
+    })),
+  });
+
+  // Convert backend API relation item to frontend UMLRelation
+  const mapApiRelToUml = (r: RelacionApiItem): UMLRelation => ({
+    id: r.id_relacion.toString(),
+    sourceId: r.id_clase_origen.toString(),
+    targetId: r.id_clase_destino.toString(),
+    type: r.tipo as any,
+    sourceMultiplicity: r.multiplicidad_origen || '1',
+    targetMultiplicity: r.multiplicidad_destino || '1',
+    roleName: r.nombre || r.rol_destino || '',
+  });
+
+  // Load Diagram from API
+  const loadDiagramData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      let activeId = propProjectId;
+      if (!activeId) {
+        const stored = localStorage.getItem('classflow_active_project_id');
+        if (stored) {
+          activeId = parseInt(stored, 10);
+        }
+      }
+
+      // If still no project ID, fetch the user's projects to select the first one
+      if (!activeId) {
+        const userProjects = await proyectoService.getProyectos('all');
+        if (userProjects.length > 0) {
+          activeId = userProjects[0].id_proyecto;
+          localStorage.setItem('classflow_active_project_id', activeId.toString());
+        } else {
+          setErrorMessage('No tienes ningún proyecto creado. Crea uno primero en la sección de Proyectos.');
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Fetch project details for title
+      try {
+        const proj = await proyectoService.getProyecto(activeId);
+        setProjectName(proj.nombre);
+      } catch {
+        // Fallback
+        setProjectName(`Proyecto #${activeId}`);
+      }
+
+      // Fetch Diagram
+      const diagData = await diagramaService.getDiagramaProyecto(activeId);
+      setDiagrama(diagData);
+
+      const mappedNodes = (diagData.clases || []).map(mapApiClassToNode);
+      const mappedRels = (diagData.relaciones || []).map(mapApiRelToUml);
+
+      setClasses(mappedNodes);
+      setRelations(mappedRels);
+
+      if (mappedNodes.length > 0) {
+        setSelectedClassId(mappedNodes[0].id);
+        if (mappedNodes[0].attributes.length > 0) {
+          setEditingAttrId(mappedNodes[0].attributes[0].id);
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error al cargar el diagrama UML');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [propProjectId]);
+
+  useEffect(() => {
+    loadDiagramData();
+  }, [loadDiagramData]);
 
   // Selected class helper
   const selectedClass = classes.find((c) => c.id === selectedClassId) || classes[0];
 
-  // Drag handlers
+  // Drag handlers with backend persistence on mouse up
   const handleMouseDown = (nodeId: string, e: React.MouseEvent) => {
     setSelectedClassId(nodeId);
+    if (!canEdit) return; // Block dragging in read-only mode
+
     setDraggingNodeId(nodeId);
     const node = classes.find((c) => c.id === nodeId);
     if (node) {
@@ -63,28 +219,211 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!draggingNodeId) return;
-    const newX = Math.max(20, Math.min(900, e.clientX - dragOffset.x));
-    const newY = Math.max(20, Math.min(600, e.clientY - dragOffset.y));
+    if (!draggingNodeId || !canEdit) return;
+    const newX = Math.max(20, Math.min(2400, e.clientX - dragOffset.x));
+    const newY = Math.max(20, Math.min(1800, e.clientY - dragOffset.y));
 
     setClasses((prev) =>
       prev.map((cls) => (cls.id === draggingNodeId ? { ...cls, x: newX, y: newY } : cls))
     );
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
+    if (!draggingNodeId || !diagrama || !canEdit) {
+      setDraggingNodeId(null);
+      return;
+    }
+
+    const currentId = draggingNodeId;
     setDraggingNodeId(null);
+    const node = classes.find((c) => c.id === currentId);
+    if (!node) return;
+
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.updateClasePosicion(
+        diagrama.id_diagrama,
+        parseInt(node.id, 10),
+        node.x,
+        node.y
+      );
+      setSaveStatus('guardado');
+    } catch (err) {
+      console.error('Error al persistir posición:', err);
+      setSaveStatus('error');
+    }
   };
 
-  // Inspector edit handlers
-  const handleUpdateAttribute = (
-    classId: string,
+  // =========================================================================
+  // CLASE OPERATIONS (CRUD)
+  // =========================================================================
+  const handleCreateNewClass = async () => {
+    if (!diagrama || !canEdit) return;
+    const nextCount = classes.length + 1;
+    const proposedName = prompt('Nombre de la nueva clase UML:', `Entidad${nextCount}`);
+    if (!proposedName || !proposedName.trim()) return;
+
+    try {
+      setSaveStatus('guardando');
+      const newPos = {
+        x: 180 + (nextCount % 5) * 60,
+        y: 150 + (nextCount % 5) * 40,
+      };
+      const created = await diagramaService.createClase(diagrama.id_diagrama, {
+        nombre: proposedName.trim(),
+        estereotipo: '«entity»',
+        visibilidad: 'public',
+        es_abstracta: false,
+        posicion_x: newPos.x,
+        posicion_y: newPos.y,
+        ancho: 260,
+        alto: 160,
+      });
+
+      // Default attributes: id
+      await diagramaService.createAtributo(created.id_clase, {
+        nombre: 'id',
+        tipo_dato: 'Long',
+        visibilidad: 'private',
+        es_nullable: false,
+        orden: 0,
+      });
+
+      // Reload diagram to get synchronized state
+      await loadDiagramData();
+      setSelectedClassId(created.id_clase.toString());
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al crear clase: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleDeleteSelectedClass = async () => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    const ok = confirm(`¿Estás seguro de eliminar la clase '${selectedClass.name}' y todas sus relaciones asociadas?`);
+    if (!ok) return;
+
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.deleteClase(diagrama.id_diagrama, parseInt(selectedClass.id, 10));
+      // Remove from local state
+      const remainingClasses = classes.filter((c) => c.id !== selectedClass.id);
+      setClasses(remainingClasses);
+      setRelations((prev) =>
+        prev.filter((r) => r.sourceId !== selectedClass.id && r.targetId !== selectedClass.id)
+      );
+      setSelectedClassId(remainingClasses.length > 0 ? remainingClasses[0].id : null);
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al eliminar clase: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleUpdateClassName = async (newName: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    const clean = newName.trim();
+    if (!clean) return;
+
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.updateClase(diagrama.id_diagrama, parseInt(selectedClass.id, 10), {
+        nombre: clean,
+      });
+      setClasses((prev) =>
+        prev.map((c) => (c.id === selectedClass.id ? { ...c, name: clean } : c))
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al renombrar clase: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleUpdateClassStereotype = async (st: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.updateClase(diagrama.id_diagrama, parseInt(selectedClass.id, 10), {
+        estereotipo: st.trim() || undefined,
+      });
+      setClasses((prev) =>
+        prev.map((c) => (c.id === selectedClass.id ? { ...c, stereotype: st } : c))
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      console.error(err);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleToggleConcrete = async (isConcrete: boolean) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.updateClase(diagrama.id_diagrama, parseInt(selectedClass.id, 10), {
+        es_abstracta: !isConcrete,
+      });
+      setClasses((prev) =>
+        prev.map((c) => (c.id === selectedClass.id ? { ...c, isConcrete } : c))
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      console.error(err);
+      setSaveStatus('error');
+    }
+  };
+
+  // =========================================================================
+  // ATRIBUTOS OPERATIONS (CRUD)
+  // =========================================================================
+  const handleAddAttribute = async () => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      const nextCount = selectedClass.attributes.length + 1;
+      const created = await diagramaService.createAtributo(parseInt(selectedClass.id, 10), {
+        nombre: `campo${nextCount}`,
+        tipo_dato: 'String',
+        visibilidad: 'private',
+        es_nullable: true,
+        orden: nextCount,
+      });
+
+      const newAttr: UMLAttribute = {
+        id: created.id_atributo.toString(),
+        visibility: toVisChar(created.visibilidad),
+        name: created.nombre,
+        type: created.tipo_dato,
+        isNullable: created.es_nullable,
+        isStatic: created.es_estatico,
+        isFinal: created.es_final,
+      };
+
+      setClasses((prev) =>
+        prev.map((c) =>
+          c.id === selectedClass.id ? { ...c, attributes: [...c.attributes, newAttr] } : c
+        )
+      );
+      setEditingAttrId(newAttr.id);
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al agregar atributo: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleUpdateAttribute = async (
     attrId: string,
     updates: Partial<UMLAttribute>
   ) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+
+    // Local optimistic update
     setClasses((prev) =>
       prev.map((cls) => {
-        if (cls.id !== classId) return cls;
+        if (cls.id !== selectedClass.id) return cls;
         return {
           ...cls,
           attributes: cls.attributes.map((attr) =>
@@ -93,83 +432,193 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
         };
       })
     );
-  };
 
-  const handleAddAttribute = () => {
-    if (!selectedClass) return;
-    const newId = `attr_${Date.now()}`;
-    const newAttr: UMLAttribute = {
-      id: newId,
-      visibility: '-',
-      name: 'nuevoCampo',
-      type: 'String',
-      isNullable: true,
-    };
-    setClasses((prev) =>
-      prev.map((cls) =>
-        cls.id === selectedClass.id
-          ? { ...cls, attributes: [...cls.attributes, newAttr] }
-          : cls
-      )
-    );
-    setEditingAttrId(newId);
-  };
+    // Debounce / send update to backend
+    try {
+      setSaveStatus('guardando');
+      const payload: any = {};
+      if (updates.name !== undefined) payload.nombre = updates.name;
+      if (updates.type !== undefined) payload.tipo_dato = updates.type;
+      if (updates.visibility !== undefined) payload.visibilidad = toVisWord(updates.visibility);
+      if (updates.isNullable !== undefined) payload.es_nullable = updates.isNullable;
+      if (updates.isStatic !== undefined) payload.es_estatico = updates.isStatic;
+      if (updates.isFinal !== undefined) payload.es_final = updates.isFinal;
 
-  const handleDeleteAttribute = (attrId: string) => {
-    if (!selectedClass) return;
-    setClasses((prev) =>
-      prev.map((cls) =>
-        cls.id === selectedClass.id
-          ? { ...cls, attributes: cls.attributes.filter((a) => a.id !== attrId) }
-          : cls
-      )
-    );
-    if (editingAttrId === attrId) {
-      setEditingAttrId('');
+      await diagramaService.updateAtributo(parseInt(attrId, 10), payload);
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      console.error('Error al actualizar atributo:', err);
+      setSaveStatus('error');
     }
   };
 
-  const handleAddMethod = () => {
-    if (!selectedClass) return;
-    const newMethod: UMLMethod = {
-      id: `method_${Date.now()}`,
-      visibility: '+',
-      name: 'nuevaOperacion',
-      returnType: 'void',
-    };
-    setClasses((prev) =>
-      prev.map((cls) =>
-        cls.id === selectedClass.id
-          ? { ...cls, methods: [...cls.methods, newMethod] }
-          : cls
-      )
-    );
+  const handleDeleteAttribute = async (attrId: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.deleteAtributo(parseInt(attrId, 10));
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id
+            ? { ...cls, attributes: cls.attributes.filter((a) => a.id !== attrId) }
+            : cls
+        )
+      );
+      if (editingAttrId === attrId) {
+        setEditingAttrId('');
+      }
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al eliminar atributo: ${err.message}`);
+      setSaveStatus('error');
+    }
   };
 
-  // Add new class button
-  const handleCreateNewClass = () => {
-    const classCount = classes.length + 1;
-    const newClass: UMLClassNode = {
-      id: `entidad_${Date.now()}`,
-      name: `Entidad${classCount}`,
-      stereotype: '«entity»',
-      x: 180 + classCount * 40,
-      y: 200 + classCount * 30,
-      width: 250,
-      isConcrete: true,
-      attributes: [
-        { id: `id_${Date.now()}`, visibility: '-', name: 'id', type: 'Long', isPk: true },
-        { id: `desc_${Date.now()}`, visibility: '-', name: 'descripcion', type: 'String' },
-      ],
-      methods: [
-        { id: `m_${Date.now()}`, visibility: '+', name: 'procesar', returnType: 'void' },
-      ],
-    };
-    setClasses((prev) => [...prev, newClass]);
-    setSelectedClassId(newClass.id);
+  // =========================================================================
+  // MÉTODOS OPERATIONS (CRUD)
+  // =========================================================================
+  const handleAddMethod = async () => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      const nextCount = selectedClass.methods.length + 1;
+      const created = await diagramaService.createMetodo(parseInt(selectedClass.id, 10), {
+        nombre: `operacion${nextCount}`,
+        tipo_retorno: 'void',
+        visibilidad: 'public',
+        orden: nextCount,
+      });
+
+      const newMethod: UMLMethod = {
+        id: created.id_metodo.toString(),
+        visibility: toVisChar(created.visibilidad),
+        name: created.nombre,
+        returnType: created.tipo_retorno,
+      };
+
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id ? { ...cls, methods: [...cls.methods, newMethod] } : cls
+        )
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al agregar método: ${err.message}`);
+      setSaveStatus('error');
+    }
   };
 
-  // AI Assistant Chat Submit
+  const handleEditMethodName = async (methodId: string, oldName: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    const newName = prompt('Nombre del método / operación:', oldName);
+    if (!newName || !newName.trim()) return;
+
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.updateMetodo(parseInt(methodId, 10), {
+        nombre: newName.trim(),
+      });
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id
+            ? {
+                ...cls,
+                methods: cls.methods.map((m) =>
+                  m.id === methodId ? { ...m, name: newName.trim() } : m
+                ),
+              }
+            : cls
+        )
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al actualizar método: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleDeleteMethod = async (methodId: string) => {
+    if (!diagrama || !canEdit || !selectedClass) return;
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.deleteMetodo(parseInt(methodId, 10));
+      setClasses((prev) =>
+        prev.map((cls) =>
+          cls.id === selectedClass.id
+            ? { ...cls, methods: cls.methods.filter((m) => m.id !== methodId) }
+            : cls
+        )
+      );
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al eliminar método: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  // =========================================================================
+  // RELACIONES OPERATIONS (CRUD)
+  // =========================================================================
+  const handleOpenRelationModal = (type: string) => {
+    if (!canEdit) {
+      alert('Modo solo lectura: No tienes permisos para crear relaciones.');
+      return;
+    }
+    if (classes.length < 2) {
+      alert('Debes tener al menos 2 clases para crear una relación UML.');
+      return;
+    }
+    const otherClasses = classes.filter((c) => c.id !== selectedClassId);
+    setRelType(type);
+    setRelTargetId(otherClasses.length > 0 ? otherClasses[0].id : '');
+    setRelSourceMult('1');
+    setRelTargetMult('0..*');
+    setRelName('');
+    setIsRelationModalOpen(true);
+  };
+
+  const handleCreateRelationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!diagrama || !canEdit || !selectedClassId || !relTargetId) return;
+
+    try {
+      setSaveStatus('guardando');
+      const created = await diagramaService.createRelacion(diagrama.id_diagrama, {
+        id_clase_origen: parseInt(selectedClassId, 10),
+        id_clase_destino: parseInt(relTargetId, 10),
+        tipo: relType,
+        nombre: relName.trim() || undefined,
+        multiplicidad_origen: relSourceMult.trim() || undefined,
+        multiplicidad_destino: relTargetMult.trim() || undefined,
+      });
+
+      const newUmlRel = mapApiRelToUml(created);
+      setRelations((prev) => [...prev, newUmlRel]);
+      setIsRelationModalOpen(false);
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al crear relación UML: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleDeleteRelation = async (relId: string) => {
+    if (!diagrama || !canEdit) return;
+    const ok = confirm('¿Deseas eliminar esta relación UML?');
+    if (!ok) return;
+
+    try {
+      setSaveStatus('guardando');
+      await diagramaService.deleteRelacion(parseInt(relId, 10));
+      setRelations((prev) => prev.filter((r) => r.id !== relId));
+      setSaveStatus('guardado');
+    } catch (err: any) {
+      alert(`Error al eliminar relación: ${err.message}`);
+      setSaveStatus('error');
+    }
+  };
+
+  // Mock AI Assistant prompt submit
   const handleAiSend = () => {
     if (!aiInputText.trim()) return;
     const query = aiInputText.trim();
@@ -177,49 +626,45 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     setAiInputText('');
 
     setTimeout(() => {
-      if (query.toLowerCase().includes('factura') || query.toLowerCase().includes('clase')) {
-        const newClassId = 'factura_' + Date.now();
-        setClasses((prev) => [
-          ...prev,
-          {
-            id: newClassId,
-            name: 'Factura',
-            stereotype: '«entity»',
-            x: 640,
-            y: 350,
-            width: 240,
-            isConcrete: true,
-            attributes: [
-              { id: 'f1', visibility: '-', name: 'id', type: 'Long', isPk: true },
-              { id: 'f2', visibility: '-', name: 'numeroFiscal', type: 'String' },
-              { id: 'f3', visibility: '-', name: 'montoTotal', type: 'BigDecimal' },
-            ],
-            methods: [
-              { id: 'fm1', visibility: '+', name: 'emitirComprobante', returnType: 'void' },
-            ],
-          },
-        ]);
-        setSelectedClassId(newClassId);
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            sender: 'ai',
-            text: 'generada en el lienzo y sincronizada con el AST de Java/JPA.',
-            highlight: 'Clase Factura',
-          },
-        ]);
-      } else {
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            sender: 'ai',
-            text: `Comando interpretado: "${query}". El modelo UML ha sido validado contra la especificación OMG.`,
-            highlight: 'AST Sincronizado',
-          },
-        ]);
-      }
-    }, 700);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: `Comando recibido: "${query}". La generación inteligente por IA se activará en la Fase 6 (CU05). Actualmente el modelo está persistido en PostgreSQL.`,
+          highlight: 'Modo Persistente',
+        },
+      ]);
+    }, 500);
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center w-full h-[calc(100vh-3.5rem)] bg-surface text-on-surface">
+        <div className="w-10 h-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin mb-4" />
+        <p className="text-sm font-medium text-outline">Cargando modelo UML desde PostgreSQL...</p>
+      </div>
+    );
+  }
+
+  // Error state
+  if (errorMessage && !diagrama) {
+    return (
+      <div className="flex flex-col items-center justify-center w-full h-[calc(100vh-3.5rem)] bg-surface p-6 text-center">
+        <div className="w-16 h-16 rounded-full bg-error-container/40 flex items-center justify-center text-error mb-4">
+          <span className="material-symbols-outlined text-3xl">error_outline</span>
+        </div>
+        <h2 className="text-lg font-bold text-on-surface mb-2">No se pudo abrir el diagrama</h2>
+        <p className="text-sm text-outline max-w-md mb-6">{errorMessage}</p>
+        <button
+          onClick={() => onNavigate('proyectos')}
+          className="px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold hover:bg-primary-fixed-dim transition-colors"
+        >
+          Volver a Proyectos
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -227,82 +672,73 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
-      {/* Top Editor Toolbar Bar (Flush beneath Shell Header) */}
+      {/* 1. TOP TOOLBAR HEADER */}
       <div className="w-full bg-surface-container-lowest px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-md z-30 border-b border-outline-variant/30">
         <div className="flex items-center gap-4 min-w-0">
           <div className="flex items-center gap-1.5 truncate">
             <span className="text-base font-semibold text-on-surface truncate">
-              Sistema de Ventas
+              {projectName}
             </span>
             <span className="text-outline-variant font-mono text-xs">/</span>
             <span className="text-sm text-primary font-medium truncate">
-              Diagrama de clases principal
+              {diagrama?.nombre || 'Diagrama Principal'}
             </span>
           </div>
 
           {/* Sync Status Badge */}
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-low shadow-sm">
-            <span className="material-symbols-outlined text-[15px] text-tertiary">
-              check_circle
+            <span
+              className={`material-symbols-outlined text-[15px] ${
+                saveStatus === 'guardado'
+                  ? 'text-tertiary'
+                  : saveStatus === 'guardando'
+                  ? 'text-primary animate-spin'
+                  : 'text-error'
+              }`}
+            >
+              {saveStatus === 'guardado' ? 'check_circle' : saveStatus === 'guardando' ? 'sync' : 'error'}
             </span>
-            <span className="font-mono text-[11px] text-tertiary">Guardado</span>
-            <span className="font-mono text-[11px] text-outline">• Hace 4s (WS Activo)</span>
+            <span
+              className={`font-mono text-[11px] ${
+                saveStatus === 'guardado'
+                  ? 'text-tertiary'
+                  : saveStatus === 'guardando'
+                  ? 'text-primary'
+                  : 'text-error'
+              }`}
+            >
+              {saveStatus === 'guardado' ? 'Persistido' : saveStatus === 'guardando' ? 'Guardando...' : 'Error al guardar'}
+            </span>
+            <span className="font-mono text-[11px] text-outline">• PostgreSQL v18</span>
           </div>
+
+          {/* Read-Only Badge */}
+          {!canEdit && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold">
+              <span className="material-symbols-outlined text-[15px]">visibility</span>
+              <span>Modo Solo Lectura</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Collaborators Avatar Stack */}
-          <div className="flex items-center -space-x-2">
-            <div className="relative group cursor-pointer" title="Carlos Mendoza (Propietario)">
-              <img
-                className="w-7 h-7 rounded-full object-cover shadow-sm ring-2 ring-surface-container-lowest"
-                src={ASSETS.carlosMendozaAlt}
-                alt="Carlos Mendoza"
-              />
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-primary ring-1 ring-surface-container-lowest"></span>
-            </div>
-            <div className="relative group cursor-pointer" title="Ana López (Editando Producto)">
-              <img
-                className="w-7 h-7 rounded-full object-cover shadow-sm ring-2 ring-surface-container-lowest"
-                src={ASSETS.anaLopez}
-                alt="Ana López"
-              />
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-tertiary animate-ping ring-1 ring-surface-container-lowest"></span>
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-tertiary ring-1 ring-surface-container-lowest"></span>
-            </div>
-            <div className="pl-3 hidden xl:flex flex-col">
-              <span className="text-xs text-on-surface font-medium">Ana López</span>
-              <span className="font-mono text-[11px] text-tertiary">Editando Producto</span>
-            </div>
-          </div>
-
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
             <button
+              onClick={() => onNavigate('proyectos')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              <span className="hidden sm:inline">Proyectos</span>
+            </button>
+
+            <button
               onClick={() => setShareModalOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm"
-              title="Compartir sesión colaborativa"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm cursor-pointer"
+              title="Información de colaboración"
             >
               <span className="material-symbols-outlined text-[16px]">group_add</span>
               <span className="hidden sm:inline">Compartir</span>
-            </button>
-
-            <button
-              onClick={() => onNavigate('proyectos')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm"
-            >
-              <span className="material-symbols-outlined text-[16px]">cloud_download</span>
-              <span className="hidden sm:inline">Importar</span>
-            </button>
-
-            <button
-              onClick={() => {
-                alert('Exportando modelo XMI 2.4.1 compatible con Enterprise Architect y StarUML...');
-              }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm"
-            >
-              <span className="material-symbols-outlined text-[16px]">file_export</span>
-              <span className="hidden sm:inline">Exportar .xmi</span>
             </button>
 
             {/* GENERAR BACKEND ACTION BUTTON (CU10 LINK) */}
@@ -318,9 +754,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
         </div>
       </div>
 
-      {/* Main Multi-Pane Visual Area */}
+      {/* 2. MAIN MULTI-PANE VISUAL AREA */}
       <div className="relative flex-1 flex overflow-hidden bg-surface-container-lowest">
-        {/* 2. LEFT FLOATING UML TOOLBAR (CASE TOOL STYLE) */}
+        {/* LEFT FLOATING UML TOOLBAR */}
         <div className="absolute left-4 top-4 z-20 flex flex-col items-center bg-surface-container-low/95 backdrop-blur-md rounded-xl p-1 shadow-xl space-y-1 border border-outline-variant/30">
           <button
             className="p-2 rounded-lg bg-primary text-on-primary shadow-sm flex items-center justify-center transition-all"
@@ -330,61 +766,102 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           </button>
           <button
             onClick={handleCreateNewClass}
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
-            title="Agregar Clase UML (C)"
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Agregar Clase UML (C)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">add_box</span>
           </button>
           <div className="w-5 h-px bg-surface-variant my-1"></div>
 
-          {/* Connectors / UML Relations */}
+          {/* UML Relation Connectors */}
           <button
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
-            title="Asociación Directa (---)"
+            onClick={() => handleOpenRelationModal('asociacion')}
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Asociación (---)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">horizontal_rule</span>
           </button>
           <button
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center font-mono"
-            title="Agregación (◇---)"
+            onClick={() => handleOpenRelationModal('agregacion')}
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Agregación (◇---)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">diamond</span>
           </button>
           <button
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
-            title="Composición (◆---)"
+            onClick={() => handleOpenRelationModal('composicion')}
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-secondary hover:text-secondary cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Composición (◆---)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px] text-secondary">diamond</span>
           </button>
           <button
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
-            title="Herencia / Generalización (△---)"
+            onClick={() => handleOpenRelationModal('herencia')}
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Herencia / Generalización (△---)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">change_history</span>
           </button>
           <button
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
-            title="Dependencia (- - >)"
+            onClick={() => handleOpenRelationModal('dependencia')}
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Dependencia (- - >)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">trending_flat</span>
           </button>
           <button
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
-            title="Realización (- - △)"
+            onClick={() => handleOpenRelationModal('realizacion')}
+            disabled={!canEdit}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit
+                ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Realización (- - △)' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">call_made</span>
           </button>
           <div className="w-5 h-px bg-surface-variant my-1"></div>
 
           <button
-            onClick={() => {
-              if (selectedClassId && classes.length > 1) {
-                setClasses((prev) => prev.filter((c) => c.id !== selectedClassId));
-                setSelectedClassId(classes[0].id);
-              }
-            }}
-            className="p-2 rounded-lg hover:bg-error-container text-error hover:text-on-error-container transition-colors flex items-center justify-center"
-            title="Eliminar Elemento Seleccionado (Supr)"
+            onClick={handleDeleteSelectedClass}
+            disabled={!canEdit || !selectedClassId}
+            className={`p-2 rounded-lg transition-colors flex items-center justify-center ${
+              canEdit && selectedClassId
+                ? 'hover:bg-error-container text-error hover:text-on-error-container cursor-pointer'
+                : 'opacity-40 cursor-not-allowed text-outline'
+            }`}
+            title={canEdit ? 'Eliminar Clase Seleccionada' : 'Modo solo lectura'}
           >
             <span className="material-symbols-outlined text-[18px]">delete</span>
           </button>
@@ -393,21 +870,21 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           {/* Zoom controls */}
           <button
             onClick={() => setZoomLevel((z) => Math.min(150, z + 10))}
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
+            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center cursor-pointer"
             title="Acercar (+)"
           >
             <span className="material-symbols-outlined text-[18px]">zoom_in</span>
           </button>
           <button
-            onClick={() => setZoomLevel((z) => Math.max(70, z - 10))}
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
+            onClick={() => setZoomLevel((z) => Math.max(60, z - 10))}
+            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center cursor-pointer"
             title="Alejar (-)"
           >
             <span className="material-symbols-outlined text-[18px]">zoom_out</span>
           </button>
           <button
             onClick={() => setZoomLevel(100)}
-            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center"
+            className="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center cursor-pointer"
             title="Ajustar al Canvas (Fit)"
           >
             <span className="material-symbols-outlined text-[18px]">fit_screen</span>
@@ -426,58 +903,150 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             <rect width="100%" height="100%" fill="url(#dot-grid)" />
           </svg>
 
-          {/* SVG ORTHOGONAL CONNECTORS LAYER */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-            {/* Dynamic Relation between Cliente and Venta */}
-            <g className="transition-all">
-              <path
-                d="M 290 190 L 410 190 L 410 190 L 520 190"
-                fill="none"
-                stroke="#908fa0"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              {/* Multiplicity Left (1) */}
-              <rect x="296" y="168" width="22" height="18" rx="4" className="fill-surface-container-high" />
-              <text x="307" y="181" textAnchor="middle" className="fill-on-surface font-mono text-[11px] font-medium">
-                1
-              </text>
-              {/* Midpoint Role label (compras) */}
-              <rect x="375" y="166" width="60" height="18" rx="4" className="fill-surface-container-low shadow-sm" />
-              <text x="405" y="179" textAnchor="middle" className="fill-primary font-mono text-[10px]">
-                compras
-              </text>
-              {/* Multiplicity Right (0..*) */}
-              <rect x="480" y="168" width="26" height="18" rx="4" className="fill-surface-container-high" />
-              <text x="493" y="181" textAnchor="middle" className="fill-on-surface font-mono text-[11px] font-medium">
-                0..*
-              </text>
-            </g>
+          {/* SVG DYNAMIC UML CONNECTORS LAYER */}
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none z-0"
+            style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top left' }}
+          >
+            <defs>
+              {/* Markers for relationship heads */}
+              <marker
+                id="marker-herencia"
+                viewBox="0 0 12 12"
+                refX="10"
+                refY="6"
+                markerWidth="10"
+                markerHeight="10"
+                orient="auto-start-reverse"
+              >
+                <polygon points="0,1 10,6 0,11" fill="#1e1e24" stroke="#908fa0" strokeWidth="1.5" />
+              </marker>
+              <marker
+                id="marker-dependencia"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 1 L 8 5 L 0 9" fill="none" stroke="#908fa0" strokeWidth="1.5" />
+              </marker>
+            </defs>
 
-            {/* Dynamic Relation between Venta and Producto */}
-            <g className="transition-all">
-              <path
-                d="M 620 270 L 620 370 L 390 370 L 390 405"
-                fill="none"
-                stroke="#908fa0"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              {/* Filled Composition Diamond at Venta */}
-              <polygon points="620,270 615,280 620,290 625,280" className="fill-secondary-container stroke-secondary" strokeWidth="1.5" />
-              {/* Multiplicity Venta (0..*) */}
-              <rect x="630" y="285" width="26" height="18" rx="4" className="fill-surface-container-high" />
-              <text x="643" y="298" textAnchor="middle" className="fill-on-surface font-mono text-[11px] font-medium">
-                0..*
-              </text>
-              {/* Multiplicity Producto (0..*) */}
-              <rect x="400" y="380" width="26" height="18" rx="4" className="fill-surface-container-high" />
-              <text x="413" y="393" textAnchor="middle" className="fill-on-surface font-mono text-[11px] font-medium">
-                0..*
-              </text>
-            </g>
+            {relations.map((rel) => {
+              const src = classes.find((c) => c.id === rel.sourceId);
+              const tgt = classes.find((c) => c.id === rel.targetId);
+              if (!src || !tgt) return null;
+
+              const srcW = src.width || 260;
+              const tgtW = tgt.width || 260;
+              const srcH = 150;
+              const tgtH = 150;
+
+              // Compute orthogonal connector coordinates
+              let startX = src.x + srcW / 2;
+              let startY = src.y + srcH / 2;
+              let endX = tgt.x + tgtW / 2;
+              let endY = tgt.y + tgtH / 2;
+
+              if (src.x + srcW < tgt.x) {
+                // Target is to the right
+                startX = src.x + srcW;
+                startY = src.y + 60;
+                endX = tgt.x;
+                endY = tgt.y + 60;
+              } else if (tgt.x + tgtW < src.x) {
+                // Target is to the left
+                startX = src.x;
+                startY = src.y + 60;
+                endX = tgt.x + tgtW;
+                endY = tgt.y + 60;
+              } else if (src.y + srcH < tgt.y) {
+                // Target is below
+                startX = src.x + srcW / 2;
+                startY = src.y + srcH;
+                endX = tgt.x + tgtW / 2;
+                endY = tgt.y;
+              } else if (tgt.y + tgtH < src.y) {
+                // Target is above
+                startX = src.x + srcW / 2;
+                startY = src.y;
+                endX = tgt.x + tgtW / 2;
+                endY = tgt.y + tgtH;
+              }
+
+              const midX = (startX + endX) / 2;
+              const pathD = `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
+              const isDashed = rel.type === 'dependencia' || rel.type === 'realizacion';
+
+              return (
+                <g key={rel.id} className="transition-all pointer-events-auto">
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="#908fa0"
+                    strokeWidth="2"
+                    strokeDasharray={isDashed ? '6 4' : 'none'}
+                    markerEnd={
+                      rel.type === 'herencia' || rel.type === 'realizacion'
+                        ? 'url(#marker-herencia)'
+                        : rel.type === 'dependencia'
+                        ? 'url(#marker-dependencia)'
+                        : undefined
+                    }
+                  />
+
+                  {/* Agregación diamond (hollow diamond at source) */}
+                  {rel.type === 'agregacion' && (
+                    <polygon
+                      points={`${startX},${startY} ${startX + (startX < midX ? 8 : -8)},${startY - 6} ${startX + (startX < midX ? 16 : -16)},${startY} ${startX + (startX < midX ? 8 : -8)},${startY + 6}`}
+                      className="fill-surface stroke-[#908fa0]"
+                      strokeWidth="1.5"
+                    />
+                  )}
+
+                  {/* Composición diamond (filled diamond at source) */}
+                  {rel.type === 'composicion' && (
+                    <polygon
+                      points={`${startX},${startY} ${startX + (startX < midX ? 8 : -8)},${startY - 6} ${startX + (startX < midX ? 16 : -16)},${startY} ${startX + (startX < midX ? 8 : -8)},${startY + 6}`}
+                      className="fill-secondary stroke-secondary"
+                      strokeWidth="1.5"
+                    />
+                  )}
+
+                  {/* Multiplicity Source */}
+                  {rel.sourceMultiplicity && (
+                    <g transform={`translate(${startX + (startX < midX ? 10 : -35)}, ${startY - 18})`}>
+                      <rect width="26" height="16" rx="4" className="fill-surface-container-high" />
+                      <text x="13" y="12" textAnchor="middle" className="fill-on-surface font-mono text-[10px] font-medium">
+                        {rel.sourceMultiplicity}
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Multiplicity Target */}
+                  {rel.targetMultiplicity && (
+                    <g transform={`translate(${endX + (endX > midX ? -35 : 10)}, ${endY - 18})`}>
+                      <rect width="26" height="16" rx="4" className="fill-surface-container-high" />
+                      <text x="13" y="12" textAnchor="middle" className="fill-on-surface font-mono text-[10px] font-medium">
+                        {rel.targetMultiplicity}
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Role name / Midpoint label */}
+                  {rel.roleName && (
+                    <g transform={`translate(${midX - 30}, ${(startY + endY) / 2 - 10})`}>
+                      <rect width="60" height="18" rx="4" className="fill-surface-container-low shadow-sm" />
+                      <text x="30" y="13" textAnchor="middle" className="fill-primary font-mono text-[10px]">
+                        {rel.roleName}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
           </svg>
 
           {/* UML NODES LAYER */}
@@ -492,7 +1061,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                   key={cls.id}
                   onMouseDown={(e) => handleMouseDown(cls.id, e)}
                   style={{ left: `${cls.x}px`, top: `${cls.y}px`, width: `${cls.width || 260}px` }}
-                  className={`absolute rounded-xl transition-shadow duration-100 cursor-move ${
+                  className={`absolute rounded-xl transition-shadow duration-100 ${
+                    canEdit ? 'cursor-move' : 'cursor-default'
+                  } ${
                     isSelected
                       ? 'bg-surface-container shadow-2xl ring-2 ring-primary z-10'
                       : 'bg-surface-container shadow-xl hover:shadow-2xl z-0'
@@ -573,6 +1144,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                         </div>
                       );
                     })}
+                    {cls.attributes.length === 0 && (
+                      <div className="text-[11px] text-outline font-mono italic py-1">Sin atributos</div>
+                    )}
                   </div>
 
                   {/* Separator Bar */}
@@ -587,37 +1161,36 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                         <span className="text-outline">{method.returnType}</span>
                       </div>
                     ))}
+                    {cls.methods.length === 0 && (
+                      <div className="text-[11px] text-outline font-mono italic py-0.5">Sin métodos</div>
+                    )}
                   </div>
-
-                  {/* REAL-TIME COLLABORATOR CURSOR: ANA LÓPEZ (ATTACHED TO PRODUCTO) */}
-                  {cls.id === 'producto' && (
-                    <div className="absolute -right-8 -top-7 pointer-events-none z-30 flex items-center gap-1 animate-bounce">
-                      <span className="material-symbols-outlined text-tertiary text-[22px] drop-shadow-md">
-                        near_me
-                      </span>
-                      <div className="px-2.5 py-0.5 rounded-full bg-tertiary text-on-tertiary-container text-[11px] font-semibold shadow-lg whitespace-nowrap">
-                        Ana López (editando)
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* 3.4 CANVAS MINIMAP (BOTTOM-LEFT) */}
+          {/* CANVAS MINIMAP (BOTTOM-LEFT) */}
           <div className="absolute left-4 bottom-4 w-44 h-32 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md p-2 shadow-xl flex flex-col justify-between border border-outline-variant/30">
             <div className="flex items-center justify-between px-1">
               <span className="font-mono text-xs text-outline">Minimapa</span>
               <span className="font-mono text-xs text-tertiary font-medium">{zoomLevel}%</span>
             </div>
-            {/* Mini View Representation */}
             <div className="relative w-full flex-1 bg-surface-container-low rounded overflow-hidden mt-1 border border-outline-variant/20">
-              {/* Mini nodes preview */}
-              <div className="absolute left-3 top-2 w-6 h-5 bg-surface-variant rounded-xs" />
-              <div className="absolute left-20 top-2 w-7 h-5 bg-surface-variant rounded-xs" />
-              <div className="absolute left-10 top-14 w-8 h-6 bg-primary rounded-xs ring-1 ring-primary-fixed" />
-              {/* Viewport Window Outline */}
+              {classes.map((c) => (
+                <div
+                  key={c.id}
+                  style={{
+                    left: `${Math.max(2, Math.min(130, c.x / 14))}px`,
+                    top: `${Math.max(2, Math.min(60, c.y / 14))}px`,
+                    width: '12px',
+                    height: '8px',
+                  }}
+                  className={`absolute rounded-xs ${
+                    c.id === selectedClassId ? 'bg-primary ring-1 ring-primary-fixed' : 'bg-surface-variant'
+                  }`}
+                />
+              ))}
               <div className="absolute inset-0 bg-primary/10 rounded pointer-events-none border border-primary/30" />
             </div>
           </div>
@@ -631,384 +1204,401 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               <span className="text-[11px] font-semibold uppercase tracking-wider text-outline">
                 Inspector de Clase
               </span>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-base font-semibold text-on-surface">
-                  {selectedClass.name}
-                </span>
-                <span className="px-1.5 py-0.5 rounded bg-surface-container-high text-primary font-mono text-[11px]">
-                  {selectedClass.isConcrete ? 'Concrete' : 'Abstract'}
-                </span>
-              </div>
+              {selectedClass ? (
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-base font-semibold text-on-surface">
+                    {selectedClass.name}
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-surface-container-high text-primary font-mono text-[11px]">
+                    {selectedClass.isConcrete ? 'Concrete' : 'Abstract'}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-sm text-outline mt-1 italic">Ninguna clase seleccionada</span>
+              )}
             </div>
-            <button
-              onClick={() => {
-                const newName = prompt('Cambiar nombre de clase:', selectedClass.name);
-                if (newName) {
-                  setClasses((prev) =>
-                    prev.map((c) => (c.id === selectedClass.id ? { ...c, name: newName } : c))
-                  );
-                }
-              }}
-              className="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-bright transition-colors"
-              title="Opciones de clase"
-            >
-              <span className="material-symbols-outlined text-[18px]">more_vert</span>
-            </button>
+            {selectedClass && canEdit && (
+              <button
+                onClick={() => {
+                  const newName = prompt('Cambiar nombre de clase:', selectedClass.name);
+                  if (newName) handleUpdateClassName(newName);
+                }}
+                className="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-bright transition-colors cursor-pointer"
+                title="Cambiar nombre de clase"
+              >
+                <span className="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+            )}
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex px-4 bg-surface-container-low border-b border-outline-variant/20">
-            <button
-              onClick={() => setInspectorTab('general')}
-              className={`py-2 px-3 text-xs font-medium transition-colors ${
-                inspectorTab === 'general'
-                  ? 'text-primary font-semibold border-b-2 border-primary'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              General
-            </button>
-            <button
-              onClick={() => setInspectorTab('atributos')}
-              className={`py-2 px-3 text-xs font-medium transition-colors relative ${
-                inspectorTab === 'atributos'
-                  ? 'text-primary font-semibold border-b-2 border-primary'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              Atributos ({selectedClass.attributes.length})
-            </button>
-            <button
-              onClick={() => setInspectorTab('metodos')}
-              className={`py-2 px-3 text-xs font-medium transition-colors ${
-                inspectorTab === 'metodos'
-                  ? 'text-primary font-semibold border-b-2 border-primary'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              Métodos ({selectedClass.methods.length})
-            </button>
-          </div>
-
-          {/* Inspector Body */}
-          <div className="p-4 flex-1 space-y-4">
-            {/* GENERAL TAB */}
-            {inspectorTab === 'general' && (
-              <div className="space-y-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-outline">Nombre de Entidad</label>
-                  <input
-                    type="text"
-                    value={selectedClass.name}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setClasses((prev) =>
-                        prev.map((c) => (c.id === selectedClass.id ? { ...c, name: val } : c))
-                      );
-                    }}
-                    className="w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded outline-none border border-outline-variant/30 focus:border-primary"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-outline">Estereotipo</label>
-                  <input
-                    type="text"
-                    value={selectedClass.stereotype}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setClasses((prev) =>
-                        prev.map((c) => (c.id === selectedClass.id ? { ...c, stereotype: val } : c))
-                      );
-                    }}
-                    className="w-full bg-surface-container-lowest text-primary text-xs p-2 rounded outline-none border border-outline-variant/30"
-                  />
-                </div>
-                <div className="flex items-center gap-2 pt-2">
-                  <input
-                    type="checkbox"
-                    id="concreteCheck"
-                    checked={selectedClass.isConcrete}
-                    onChange={(e) => {
-                      const chk = e.target.checked;
-                      setClasses((prev) =>
-                        prev.map((c) => (c.id === selectedClass.id ? { ...c, isConcrete: chk } : c))
-                      );
-                    }}
-                    className="accent-primary"
-                  />
-                  <label htmlFor="concreteCheck" className="text-xs text-on-surface cursor-pointer">
-                    Clase Concreta (genera tabla en DB)
-                  </label>
-                </div>
+          {selectedClass && (
+            <>
+              <div className="flex px-4 bg-surface-container-low border-b border-outline-variant/20">
+                <button
+                  onClick={() => setInspectorTab('general')}
+                  className={`py-2 px-3 text-xs font-medium transition-colors cursor-pointer ${
+                    inspectorTab === 'general'
+                      ? 'text-primary font-semibold border-b-2 border-primary'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  General
+                </button>
+                <button
+                  onClick={() => setInspectorTab('atributos')}
+                  className={`py-2 px-3 text-xs font-medium transition-colors cursor-pointer relative ${
+                    inspectorTab === 'atributos'
+                      ? 'text-primary font-semibold border-b-2 border-primary'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  Atributos ({selectedClass.attributes.length})
+                </button>
+                <button
+                  onClick={() => setInspectorTab('metodos')}
+                  className={`py-2 px-3 text-xs font-medium transition-colors cursor-pointer ${
+                    inspectorTab === 'metodos'
+                      ? 'text-primary font-semibold border-b-2 border-primary'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  Métodos ({selectedClass.methods.length})
+                </button>
               </div>
-            )}
 
-            {/* ATRIBUTOS TAB */}
-            {inspectorTab === 'atributos' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-on-surface">Campos / Atributos</span>
-                  <button
-                    onClick={handleAddAttribute}
-                    className="flex items-center gap-1 text-xs text-primary hover:text-primary-fixed font-medium"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">add</span>
-                    <span>Agregar Atributo</span>
-                  </button>
-                </div>
-
-                {/* Attributes List */}
-                <div className="space-y-2">
-                  {selectedClass.attributes.map((attr) => {
-                    const isEditing = editingAttrId === attr.id;
-
-                    if (isEditing) {
-                      return (
-                        <div
-                          key={attr.id}
-                          className="p-3 rounded-lg bg-surface-container-high shadow-md space-y-3 border border-primary/30"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="material-symbols-outlined text-[16px] text-primary">
-                                edit_note
-                              </span>
-                              <span className="text-xs font-medium text-primary">
-                                Editando: {attr.name}
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => setEditingAttrId('')}
-                              className="text-outline hover:text-on-surface"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">close</span>
-                            </button>
-                          </div>
-
-                          {/* Form Grid */}
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="col-span-1">
-                              <label className="text-[11px] text-outline block mb-1">Visibilidad</label>
-                              <select
-                                value={attr.visibility}
-                                onChange={(e) =>
-                                  handleUpdateAttribute(selectedClass.id, attr.id, {
-                                    visibility: e.target.value as any,
-                                  })
-                                }
-                                className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
-                              >
-                                <option value="-">- (Private)</option>
-                                <option value="+">+ (Public)</option>
-                                <option value="#"># (Protected)</option>
-                                <option value="~">~ (Package)</option>
-                              </select>
-                            </div>
-                            <div className="col-span-2">
-                              <label className="text-[11px] text-outline block mb-1">Nombre</label>
-                              <input
-                                type="text"
-                                value={attr.name}
-                                onChange={(e) =>
-                                  handleUpdateAttribute(selectedClass.id, attr.id, {
-                                    name: e.target.value,
-                                  })
-                                }
-                                className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
-                              />
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="text-[11px] text-outline block mb-1">
-                              Tipo de Dato (Java/ORM)
-                            </label>
-                            <input
-                              type="text"
-                              value={attr.type}
-                              onChange={(e) =>
-                                handleUpdateAttribute(selectedClass.id, attr.id, {
-                                  type: e.target.value,
-                                })
-                              }
-                              className="w-full bg-surface-container-lowest text-primary font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
-                            />
-                          </div>
-
-                          <div className="flex items-center gap-3 pt-1">
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={attr.isNullable ?? false}
-                                onChange={(e) =>
-                                  handleUpdateAttribute(selectedClass.id, attr.id, {
-                                    isNullable: e.target.checked,
-                                  })
-                                }
-                                className="accent-primary rounded"
-                              />
-                              <span className="text-[11px] text-on-surface">Nullable</span>
-                            </label>
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={attr.isStatic ?? false}
-                                onChange={(e) =>
-                                  handleUpdateAttribute(selectedClass.id, attr.id, {
-                                    isStatic: e.target.checked,
-                                  })
-                                }
-                                className="accent-primary rounded"
-                              />
-                              <span className="text-[11px] text-on-surface">Estático</span>
-                            </label>
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={attr.isFinal ?? false}
-                                onChange={(e) =>
-                                  handleUpdateAttribute(selectedClass.id, attr.id, {
-                                    isFinal: e.target.checked,
-                                  })
-                                }
-                                className="accent-primary rounded"
-                              />
-                              <span className="text-[11px] text-on-surface">Final</span>
-                            </label>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        key={attr.id}
-                        className="p-2.5 rounded-lg bg-surface-container flex items-center justify-between shadow-sm border border-outline-variant/10 hover:border-outline-variant/30 transition-all"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[16px] text-outline cursor-grab">
-                            drag_indicator
-                          </span>
-                          <span className="w-5 h-5 flex items-center justify-center rounded bg-error/20 text-error font-bold font-mono text-xs">
-                            {attr.visibility}
-                          </span>
-                          <div className="flex flex-col">
-                            <span className="font-mono text-xs text-on-surface font-semibold">
-                              {attr.name}
-                            </span>
-                            <span className="font-mono text-[11px] text-primary">{attr.type}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 text-on-surface-variant">
-                          <button
-                            onClick={() => setEditingAttrId(attr.id)}
-                            className="p-1 hover:text-on-surface rounded hover:bg-surface-bright"
-                            title="Editar atributo"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">edit</span>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteAttribute(attr.id)}
-                            className="p-1 hover:text-error rounded hover:bg-surface-bright"
-                            title="Eliminar atributo"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">delete</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* METODOS TAB */}
-            {inspectorTab === 'metodos' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-on-surface">
-                    Métodos / Operaciones
-                  </span>
-                  <button
-                    onClick={handleAddMethod}
-                    className="flex items-center gap-1 text-xs text-primary hover:text-primary-fixed font-medium"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">add</span>
-                    <span>Agregar Método</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {selectedClass.methods.map((method) => (
-                    <div
-                      key={method.id}
-                      className="p-2.5 rounded-lg bg-surface-container flex items-center justify-between shadow-sm border border-outline-variant/10"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 flex items-center justify-center rounded bg-tertiary/20 text-tertiary font-bold font-mono text-xs">
-                          {method.visibility}
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="font-mono text-xs text-on-surface font-semibold">
-                            {method.name}(...)
-                          </span>
-                          <span className="font-mono text-[11px] text-outline">
-                            retorno: {method.returnType}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 text-on-surface-variant">
-                        <button
-                          onClick={() => {
-                            const newName = prompt('Nombre del método:', method.name);
-                            if (newName) {
-                              setClasses((prev) =>
-                                prev.map((c) =>
-                                  c.id === selectedClass.id
-                                    ? {
-                                        ...c,
-                                        methods: c.methods.map((m) =>
-                                          m.id === method.id ? { ...m, name: newName } : m
-                                        ),
-                                      }
-                                    : c
-                                )
-                              );
-                            }
-                          }}
-                          className="p-1 hover:text-on-surface rounded hover:bg-surface-bright"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">edit</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setClasses((prev) =>
-                              prev.map((c) =>
-                                c.id === selectedClass.id
-                                  ? {
-                                      ...c,
-                                      methods: c.methods.filter((m) => m.id !== method.id),
-                                    }
-                                  : c
-                              )
-                            );
-                          }}
-                          className="p-1 hover:text-error rounded hover:bg-surface-bright"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">delete</span>
-                        </button>
-                      </div>
+              {/* Inspector Body */}
+              <div className="p-4 flex-1 space-y-4">
+                {/* GENERAL TAB */}
+                {inspectorTab === 'general' && (
+                  <div className="space-y-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-outline">Nombre de Entidad</label>
+                      <input
+                        type="text"
+                        value={selectedClass.name}
+                        disabled={!canEdit}
+                        onChange={(e) => handleUpdateClassName(e.target.value)}
+                        className={`w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded outline-none border border-outline-variant/30 focus:border-primary ${
+                          !canEdit ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
+                      />
                     </div>
-                  ))}
-                </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-outline">Estereotipo</label>
+                      <input
+                        type="text"
+                        value={selectedClass.stereotype}
+                        disabled={!canEdit}
+                        onChange={(e) => handleUpdateClassStereotype(e.target.value)}
+                        className={`w-full bg-surface-container-lowest text-primary text-xs p-2 rounded outline-none border border-outline-variant/30 ${
+                          !canEdit ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-2">
+                      <input
+                        type="checkbox"
+                        id="concreteCheck"
+                        checked={selectedClass.isConcrete}
+                        disabled={!canEdit}
+                        onChange={(e) => handleToggleConcrete(e.target.checked)}
+                        className="accent-primary"
+                      />
+                      <label htmlFor="concreteCheck" className="text-xs text-on-surface cursor-pointer">
+                        Clase Concreta (genera entidad/tabla en PostgreSQL)
+                      </label>
+                    </div>
+
+                    {/* Relaciones conectadas */}
+                    <div className="pt-3 border-t border-outline-variant/20">
+                      <span className="text-xs font-semibold text-on-surface block mb-2">
+                        Relaciones Conectadas
+                      </span>
+                      {relations.filter(
+                        (r) => r.sourceId === selectedClass.id || r.targetId === selectedClass.id
+                      ).length === 0 ? (
+                        <p className="text-xs text-outline italic">Sin relaciones para esta clase.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {relations
+                            .filter((r) => r.sourceId === selectedClass.id || r.targetId === selectedClass.id)
+                            .map((r) => {
+                              const otherId = r.sourceId === selectedClass.id ? r.targetId : r.sourceId;
+                              const otherClass = classes.find((c) => c.id === otherId);
+                              return (
+                                <div
+                                  key={r.id}
+                                  className="flex items-center justify-between p-2 rounded bg-surface-container text-xs font-mono"
+                                >
+                                  <span className="truncate">
+                                    {r.type} con <b className="text-primary">{otherClass?.name || otherId}</b>
+                                  </span>
+                                  {canEdit && (
+                                    <button
+                                      onClick={() => handleDeleteRelation(r.id)}
+                                      className="text-error hover:text-error/80 ml-2"
+                                      title="Eliminar relación"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">delete</span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ATRIBUTOS TAB */}
+                {inspectorTab === 'atributos' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-on-surface">Campos / Atributos</span>
+                      {canEdit && (
+                        <button
+                          onClick={handleAddAttribute}
+                          className="flex items-center gap-1 text-xs text-primary hover:text-primary-fixed font-medium cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">add</span>
+                          <span>Agregar Atributo</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Attributes List */}
+                    <div className="space-y-2">
+                      {selectedClass.attributes.map((attr) => {
+                        const isEditing = editingAttrId === attr.id;
+
+                        if (isEditing && canEdit) {
+                          return (
+                            <div
+                              key={attr.id}
+                              className="p-3 rounded-lg bg-surface-container-high shadow-md space-y-3 border border-primary/30"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-[16px] text-primary">
+                                    edit_note
+                                  </span>
+                                  <span className="text-xs font-medium text-primary">
+                                    Editando: {attr.name}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => setEditingAttrId('')}
+                                  className="text-outline hover:text-on-surface"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">close</span>
+                                </button>
+                              </div>
+
+                              {/* Form Grid */}
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="col-span-1">
+                                  <label className="text-[11px] text-outline block mb-1">Visibilidad</label>
+                                  <select
+                                    value={attr.visibility}
+                                    onChange={(e) =>
+                                      handleUpdateAttribute(attr.id, {
+                                        visibility: e.target.value as any,
+                                      })
+                                    }
+                                    className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
+                                  >
+                                    <option value="-">- (Private)</option>
+                                    <option value="+">+ (Public)</option>
+                                    <option value="#"># (Protected)</option>
+                                    <option value="~">~ (Package)</option>
+                                  </select>
+                                </div>
+                                <div className="col-span-2">
+                                  <label className="text-[11px] text-outline block mb-1">Nombre</label>
+                                  <input
+                                    type="text"
+                                    value={attr.name}
+                                    onChange={(e) =>
+                                      handleUpdateAttribute(attr.id, {
+                                        name: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
+                                  />
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] text-outline block mb-1">
+                                  Tipo de Dato (Java/JPA)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={attr.type}
+                                  onChange={(e) =>
+                                    handleUpdateAttribute(attr.id, {
+                                      type: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-surface-container-lowest text-primary font-mono text-xs p-1.5 rounded outline-none border border-outline-variant/30"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-3 pt-1">
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={attr.isNullable ?? true}
+                                    onChange={(e) =>
+                                      handleUpdateAttribute(attr.id, {
+                                        isNullable: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-primary rounded"
+                                  />
+                                  <span className="text-[11px] text-on-surface">Nullable</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={attr.isStatic ?? false}
+                                    onChange={(e) =>
+                                      handleUpdateAttribute(attr.id, {
+                                        isStatic: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-primary rounded"
+                                  />
+                                  <span className="text-[11px] text-on-surface">Estático</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={attr.isFinal ?? false}
+                                    onChange={(e) =>
+                                      handleUpdateAttribute(attr.id, {
+                                        isFinal: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-primary rounded"
+                                  />
+                                  <span className="text-[11px] text-on-surface">Final</span>
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={attr.id}
+                            className="p-2.5 rounded-lg bg-surface-container flex items-center justify-between shadow-sm border border-outline-variant/10 hover:border-outline-variant/30 transition-all"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 flex items-center justify-center rounded bg-error/20 text-error font-bold font-mono text-xs">
+                                {attr.visibility}
+                              </span>
+                              <div className="flex flex-col">
+                                <span className="font-mono text-xs text-on-surface font-semibold">
+                                  {attr.name}
+                                </span>
+                                <span className="font-mono text-[11px] text-primary">{attr.type}</span>
+                              </div>
+                            </div>
+                            {canEdit && (
+                              <div className="flex items-center gap-1 text-on-surface-variant">
+                                <button
+                                  onClick={() => setEditingAttrId(attr.id)}
+                                  className="p-1 hover:text-on-surface rounded hover:bg-surface-bright cursor-pointer"
+                                  title="Editar atributo"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">edit</span>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteAttribute(attr.id)}
+                                  className="p-1 hover:text-error rounded hover:bg-surface-bright cursor-pointer"
+                                  title="Eliminar atributo"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">delete</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* MÉTODOS TAB */}
+                {inspectorTab === 'metodos' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-on-surface">
+                        Métodos / Operaciones
+                      </span>
+                      {canEdit && (
+                        <button
+                          onClick={handleAddMethod}
+                          className="flex items-center gap-1 text-xs text-primary hover:text-primary-fixed font-medium cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">add</span>
+                          <span>Agregar Método</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {selectedClass.methods.map((method) => (
+                        <div
+                          key={method.id}
+                          className="p-2.5 rounded-lg bg-surface-container flex items-center justify-between shadow-sm border border-outline-variant/10"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 flex items-center justify-center rounded bg-tertiary/20 text-tertiary font-bold font-mono text-xs">
+                              {method.visibility}
+                            </span>
+                            <div className="flex flex-col">
+                              <span className="font-mono text-xs text-on-surface font-semibold">
+                                {method.name}({method.params || ''})
+                              </span>
+                              <span className="font-mono text-[11px] text-outline">
+                                retorno: {method.returnType}
+                              </span>
+                            </div>
+                          </div>
+                          {canEdit && (
+                            <div className="flex items-center gap-1 text-on-surface-variant">
+                              <button
+                                onClick={() => handleEditMethodName(method.id, method.name)}
+                                className="p-1 hover:text-on-surface rounded hover:bg-surface-bright cursor-pointer"
+                                title="Editar nombre de método"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">edit</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteMethod(method.id)}
+                                className="p-1 hover:text-error rounded hover:bg-surface-bright cursor-pointer"
+                                title="Eliminar método"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">delete</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
-        {/* 5. FLOATING AI ASSISTANT & VOICE PROMPT DRAWER */}
+        {/* 5. FLOATING AI ASSISTANT & VOICE PROMPT DRAWER (PRESERVED FOR FASE 6) */}
         <div className="absolute right-[25rem] bottom-4 w-[26rem] bg-surface-container-low/95 backdrop-blur-xl rounded-xl shadow-2xl z-30 overflow-hidden flex flex-col border border-outline-variant/30">
-          {/* Header */}
           <div className="px-4 py-2 bg-surface-container flex items-center justify-between border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-primary text-[18px]">neurology</span>
@@ -1019,7 +1609,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               <span className="font-mono text-[11px] text-tertiary">Copilot Online</span>
               <button
                 onClick={() => setIsAiCollapsed(!isAiCollapsed)}
-                className="p-1 text-on-surface-variant hover:text-on-surface ml-1 focus:outline-none"
+                className="p-1 text-on-surface-variant hover:text-on-surface ml-1 focus:outline-none cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">
                   {isAiCollapsed ? 'expand_less' : 'expand_more'}
@@ -1030,7 +1620,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
           {!isAiCollapsed && (
             <>
-              {/* Chat Stream */}
               <div className="p-3 max-h-56 overflow-y-auto space-y-2 text-xs">
                 {chatMessages.map((msg, i) => (
                   <div
@@ -1057,7 +1646,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                   </div>
                 ))}
 
-                {/* VOICE INPUT ACTIVE STATE SIMULATION */}
                 {isListening && (
                   <div className="bg-secondary-container/40 p-2.5 rounded-lg space-y-1.5 border border-secondary/30">
                     <div className="flex items-center justify-between">
@@ -1067,31 +1655,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                           COMANDO DE VOZ: ESCUCHANDO...
                         </span>
                       </div>
-                      {/* Waveform */}
-                      <div className="flex items-center gap-1 h-3">
-                        <div className="w-1 bg-secondary rounded-full h-3 animate-pulse"></div>
-                        <div
-                          className="w-1 bg-secondary rounded-full h-1 animate-pulse"
-                          style={{ animationDelay: '75ms' }}
-                        ></div>
-                        <div
-                          className="w-1 bg-secondary rounded-full h-2.5 animate-pulse"
-                          style={{ animationDelay: '150ms' }}
-                        ></div>
-                        <div
-                          className="w-1 bg-secondary rounded-full h-3 animate-pulse"
-                          style={{ animationDelay: '300ms' }}
-                        ></div>
-                      </div>
                     </div>
-                    <p className="font-mono text-[11px] text-on-surface italic">
-                      "Agrega un atributo correo de tipo String a la clase Cliente"
-                    </p>
                   </div>
                 )}
               </div>
 
-              {/* Chat Input Field */}
               <div className="p-2 bg-surface-container flex items-center gap-2 border-t border-outline-variant/20">
                 <button
                   onClick={() => setIsListening(!isListening)}
@@ -1100,7 +1668,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                       ? 'bg-secondary text-on-secondary ring-2 ring-secondary/50'
                       : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
                   }`}
-                  title="Activar/Desactivar micrófono para comandos de voz"
+                  title="Activar/Desactivar micrófono"
                 >
                   <span className="material-symbols-outlined text-[18px]">mic</span>
                 </button>
@@ -1114,7 +1682,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 />
                 <button
                   onClick={handleAiSend}
-                  className="p-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container transition-colors shadow-sm flex items-center justify-center"
+                  className="p-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container transition-colors shadow-sm flex items-center justify-center cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[18px]">send</span>
                 </button>
@@ -1135,20 +1703,136 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-tertiary ring-1 ring-surface-container-high"></span>
             </div>
             <div className="flex flex-col">
-              <span className="text-xs font-semibold text-on-surface">Ana López</span>
+              <span className="text-xs font-semibold text-on-surface">Colaborador Conectado</span>
               <span className="text-[11px] text-on-surface-variant">
-                Se ha conectado a la sesión colaborativa
+                Sesión sincronizada con PostgreSQL
               </span>
             </div>
             <button
               onClick={() => setShowCollabToast(false)}
-              className="text-outline hover:text-on-surface ml-2 focus:outline-none"
+              className="text-outline hover:text-on-surface ml-2 focus:outline-none cursor-pointer"
             >
               <span className="material-symbols-outlined text-[16px]">close</span>
             </button>
           </div>
         )}
       </div>
+
+      {/* CREATE RELATION MODAL */}
+      {isRelationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-surface-container-low rounded-xl p-6 max-w-md w-full shadow-2xl border border-outline-variant/30 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[22px]">hub</span>
+                <h3 className="text-base font-bold text-on-surface">Crear Relación UML</h3>
+              </div>
+              <button
+                onClick={() => setIsRelationModalOpen(false)}
+                className="text-outline hover:text-on-surface cursor-pointer"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRelationSubmit} className="space-y-3">
+              <div>
+                <label className="text-xs text-outline block mb-1">Clase Origen</label>
+                <input
+                  type="text"
+                  disabled
+                  value={selectedClass?.name || ''}
+                  className="w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded border border-outline-variant/20 opacity-70"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-outline block mb-1">Clase Destino</label>
+                <select
+                  value={relTargetId}
+                  onChange={(e) => setRelTargetId(e.target.value)}
+                  required
+                  className="w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded border border-outline-variant/30 outline-none"
+                >
+                  {classes
+                    .filter((c) => c.id !== selectedClassId)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-outline block mb-1">Tipo de Relación</label>
+                <select
+                  value={relType}
+                  onChange={(e) => setRelType(e.target.value)}
+                  className="w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded border border-outline-variant/30 outline-none"
+                >
+                  <option value="asociacion">Asociación Directa (---)</option>
+                  <option value="agregacion">Agregación (◇---)</option>
+                  <option value="composicion">Composición (◆---)</option>
+                  <option value="herencia">Herencia / Generalización (△---)</option>
+                  <option value="dependencia">Dependencia (- - &gt;)</option>
+                  <option value="realizacion">Realización (- - △)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-outline block mb-1">Multiplicidad Origen</label>
+                  <input
+                    type="text"
+                    value={relSourceMult}
+                    onChange={(e) => setRelSourceMult(e.target.value)}
+                    placeholder="1, 0..*, *"
+                    className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-2 rounded border border-outline-variant/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-outline block mb-1">Multiplicidad Destino</label>
+                  <input
+                    type="text"
+                    value={relTargetMult}
+                    onChange={(e) => setRelTargetMult(e.target.value)}
+                    placeholder="1, 0..*, *"
+                    className="w-full bg-surface-container-lowest text-on-surface font-mono text-xs p-2 rounded border border-outline-variant/30"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-outline block mb-1">Nombre / Rol (Opcional)</label>
+                <input
+                  type="text"
+                  value={relName}
+                  onChange={(e) => setRelName(e.target.value)}
+                  placeholder="ej. compras, detalle"
+                  className="w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded border border-outline-variant/30"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-outline-variant/20">
+                <button
+                  type="button"
+                  onClick={() => setIsRelationModalOpen(false)}
+                  className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-bright text-xs text-on-surface cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary-fixed-dim cursor-pointer"
+                >
+                  Crear Relación
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* SHARE MODAL */}
       {shareModalOpen && (
@@ -1161,28 +1845,27 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               </div>
               <button
                 onClick={() => setShareModalOpen(false)}
-                className="text-outline hover:text-on-surface"
+                className="text-outline hover:text-on-surface cursor-pointer"
               >
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
             <p className="text-xs text-on-surface-variant">
-              Invita a otros arquitectos y desarrolladores a colaborar en tiempo real sobre el diagrama
-              UML y la generación de backend.
+              Gestiona los colaboradores con permisos de lectura o edición desde la pantalla de Proyectos.
             </p>
             <div className="flex items-center gap-2 p-2 rounded bg-surface-container font-mono text-xs text-on-surface border border-outline-variant/20">
               <span className="truncate flex-1">
-                https://classflow.ai/ws/microservices-core-v2?token=7f90e12
+                https://classflow.ai/proyectos/{diagrama?.id_proyecto}
               </span>
               <button
                 onClick={() => {
                   navigator.clipboard?.writeText(
-                    'https://classflow.ai/ws/microservices-core-v2?token=7f90e12'
+                    `https://classflow.ai/proyectos/${diagrama?.id_proyecto}`
                   );
                   setCopiedLink(true);
                   setTimeout(() => setCopiedLink(false), 2000);
                 }}
-                className="px-2.5 py-1 rounded bg-primary text-on-primary font-sans font-semibold text-xs flex items-center gap-1"
+                className="px-2.5 py-1 rounded bg-primary text-on-primary font-sans font-semibold text-xs flex items-center gap-1 cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[14px]">
                   {copiedLink ? 'check' : 'content_copy'}

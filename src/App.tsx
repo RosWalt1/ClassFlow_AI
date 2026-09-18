@@ -20,6 +20,23 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(true);
   const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+  const [activeProjectId, setActiveProjectId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem('classflow_active_project_id');
+      return saved ? parseInt(saved, 10) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleOpenProject = (projId: number) => {
+    setActiveProjectId(projId);
+    try {
+      localStorage.setItem('classflow_active_project_id', projId.toString());
+    } catch {
+      // ignore
+    }
+  };
 
   // Verify stored session against real backend on mount
   useEffect(() => {
@@ -178,7 +195,11 @@ export default function App() {
         }`}
       >
         {currentScreen === 'editor' && (
-          <EditorScreen onNavigate={handleNavigate} currentUser={currentUser} />
+          <EditorScreen
+            onNavigate={handleNavigate}
+            currentUser={currentUser}
+            projectId={activeProjectId}
+          />
         )}
 
         {currentScreen === 'proyectos' && (
@@ -186,6 +207,7 @@ export default function App() {
             onNavigate={handleNavigate}
             currentUser={currentUser}
             initialFilter="all"
+            onOpenProject={handleOpenProject}
           />
         )}
 
@@ -194,6 +216,7 @@ export default function App() {
             onNavigate={handleNavigate}
             currentUser={currentUser}
             initialFilter="guest"
+            onOpenProject={handleOpenProject}
           />
         )}
 

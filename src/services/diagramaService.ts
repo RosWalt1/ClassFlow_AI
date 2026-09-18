@@ -1,0 +1,395 @@
+import { authService } from './authService';
+
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+
+export interface ParametroApiItem {
+  id_parametro: number;
+  id_metodo: number;
+  nombre: string;
+  tipo_dato: string;
+  valor_defecto?: string | null;
+  orden: number;
+}
+
+export interface MetodoApiItem {
+  id_metodo: number;
+  id_clase: number;
+  nombre: string;
+  tipo_retorno: string;
+  visibilidad: string;
+  es_estatico: boolean;
+  es_abstracto: boolean;
+  orden: number;
+  parametros: ParametroApiItem[];
+}
+
+export interface AtributoApiItem {
+  id_atributo: number;
+  id_clase: number;
+  nombre: string;
+  tipo_dato: string;
+  visibilidad: string;
+  valor_defecto?: string | null;
+  es_estatico: boolean;
+  es_final: boolean;
+  es_nullable: boolean;
+  orden: number;
+}
+
+export interface ClaseApiItem {
+  id_clase: number;
+  id_diagrama: number;
+  nombre: string;
+  estereotipo?: string | null;
+  visibilidad: string;
+  es_abstracta: boolean;
+  posicion_x: number;
+  posicion_y: number;
+  ancho: number;
+  alto: number;
+  fecha_creacion: string;
+  fecha_modificacion: string;
+  atributos: AtributoApiItem[];
+  metodos: MetodoApiItem[];
+}
+
+export interface RelacionApiItem {
+  id_relacion: number;
+  id_diagrama: number;
+  id_clase_origen: number;
+  id_clase_destino: number;
+  tipo: string;
+  nombre?: string | null;
+  multiplicidad_origen?: string | null;
+  multiplicidad_destino?: string | null;
+  rol_origen?: string | null;
+  rol_destino?: string | null;
+  navegabilidad_origen: boolean;
+  navegabilidad_destino: boolean;
+  fecha_creacion: string;
+}
+
+export interface DiagramaApiItem {
+  id_diagrama: number;
+  id_proyecto: number;
+  nombre: string;
+  descripcion?: string | null;
+  version: number;
+  fecha_creacion: string;
+  fecha_modificacion: string;
+  es_propietario: boolean;
+  permiso_edicion: boolean;
+  clases: ClaseApiItem[];
+  relaciones: RelacionApiItem[];
+}
+
+class DiagramaService {
+  private getHeaders(): HeadersInit {
+    const token = authService.getToken();
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }
+
+  private async handleResponse<T>(res: Response): Promise<T> {
+    if (!res.ok) {
+      let detail = `Error ${res.status}: ${res.statusText}`;
+      try {
+        const errorJson = await res.json();
+        detail = errorJson.detail || detail;
+      } catch {
+        // use default detail
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // =========================================================================
+  // DIAGRAMA
+  // =========================================================================
+  async getDiagramaProyecto(proyectoId: number): Promise<DiagramaApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/proyectos/${proyectoId}/diagrama`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse<DiagramaApiItem>(res);
+  }
+
+  async updateDiagrama(diagramaId: number, data: { nombre?: string; descripcion?: string }): Promise<DiagramaApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<DiagramaApiItem>(res);
+  }
+
+  // =========================================================================
+  // CLASES UML
+  // =========================================================================
+  async createClase(
+    diagramaId: number,
+    data: {
+      nombre: string;
+      estereotipo?: string;
+      visibilidad?: string;
+      es_abstracta?: boolean;
+      posicion_x?: number;
+      posicion_y?: number;
+      ancho?: number;
+      alto?: number;
+    }
+  ): Promise<ClaseApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<ClaseApiItem>(res);
+  }
+
+  async updateClase(
+    diagramaId: number,
+    claseId: number,
+    data: {
+      nombre?: string;
+      estereotipo?: string;
+      visibilidad?: string;
+      es_abstracta?: boolean;
+      ancho?: number;
+      alto?: number;
+    }
+  ): Promise<ClaseApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases/${claseId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<ClaseApiItem>(res);
+  }
+
+  async updateClasePosicion(
+    diagramaId: number,
+    claseId: number,
+    posicion_x: number,
+    posicion_y: number
+  ): Promise<ClaseApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases/${claseId}/posicion`, {
+      method: 'PATCH',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ posicion_x, posicion_y }),
+    });
+    return this.handleResponse<ClaseApiItem>(res);
+  }
+
+  async deleteClase(diagramaId: number, claseId: number): Promise<void> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases/${claseId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(res);
+  }
+
+  // =========================================================================
+  // ATRIBUTOS UML
+  // =========================================================================
+  async createAtributo(
+    claseId: number,
+    data: {
+      nombre: string;
+      tipo_dato: string;
+      visibilidad?: string;
+      valor_defecto?: string;
+      es_estatico?: boolean;
+      es_final?: boolean;
+      es_nullable?: boolean;
+      orden?: number;
+    }
+  ): Promise<AtributoApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/clases/${claseId}/atributos`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<AtributoApiItem>(res);
+  }
+
+  async updateAtributo(
+    atributoId: number,
+    data: {
+      nombre?: string;
+      tipo_dato?: string;
+      visibilidad?: string;
+      valor_defecto?: string;
+      es_estatico?: boolean;
+      es_final?: boolean;
+      es_nullable?: boolean;
+      orden?: number;
+    }
+  ): Promise<AtributoApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/atributos/${atributoId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<AtributoApiItem>(res);
+  }
+
+  async deleteAtributo(atributoId: number): Promise<void> {
+    const res = await fetch(`${API_BASE_URL}/api/atributos/${atributoId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(res);
+  }
+
+  // =========================================================================
+  // MÉTODOS Y PARÁMETROS UML
+  // =========================================================================
+  async createMetodo(
+    claseId: number,
+    data: {
+      nombre: string;
+      tipo_retorno?: string;
+      visibilidad?: string;
+      es_estatico?: boolean;
+      es_abstracto?: boolean;
+      orden?: number;
+    }
+  ): Promise<MetodoApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/clases/${claseId}/metodos`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<MetodoApiItem>(res);
+  }
+
+  async updateMetodo(
+    metodoId: number,
+    data: {
+      nombre?: string;
+      tipo_retorno?: string;
+      visibilidad?: string;
+      es_estatico?: boolean;
+      es_abstracto?: boolean;
+      orden?: number;
+    }
+  ): Promise<MetodoApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/metodos/${metodoId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<MetodoApiItem>(res);
+  }
+
+  async deleteMetodo(metodoId: number): Promise<void> {
+    const res = await fetch(`${API_BASE_URL}/api/metodos/${metodoId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(res);
+  }
+
+  async createParametro(
+    metodoId: number,
+    data: {
+      nombre: string;
+      tipo_dato: string;
+      valor_defecto?: string;
+      orden?: number;
+    }
+  ): Promise<ParametroApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/metodos/${metodoId}/parametros`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<ParametroApiItem>(res);
+  }
+
+  async updateParametro(
+    parametroId: number,
+    data: {
+      nombre?: string;
+      tipo_dato?: string;
+      valor_defecto?: string;
+      orden?: number;
+    }
+  ): Promise<ParametroApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/parametros/${parametroId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<ParametroApiItem>(res);
+  }
+
+  async deleteParametro(parametroId: number): Promise<void> {
+    const res = await fetch(`${API_BASE_URL}/api/parametros/${parametroId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(res);
+  }
+
+  // =========================================================================
+  // RELACIONES UML
+  // =========================================================================
+  async createRelacion(
+    diagramaId: number,
+    data: {
+      id_clase_origen: number;
+      id_clase_destino: number;
+      tipo: string;
+      nombre?: string;
+      multiplicidad_origen?: string;
+      multiplicidad_destino?: string;
+      rol_origen?: string;
+      rol_destino?: string;
+      navegabilidad_origen?: boolean;
+      navegabilidad_destino?: boolean;
+    }
+  ): Promise<RelacionApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/relaciones`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<RelacionApiItem>(res);
+  }
+
+  async updateRelacion(
+    relacionId: number,
+    data: {
+      tipo?: string;
+      nombre?: string;
+      multiplicidad_origen?: string;
+      multiplicidad_destino?: string;
+      rol_origen?: string;
+      rol_destino?: string;
+      navegabilidad_origen?: boolean;
+      navegabilidad_destino?: boolean;
+    }
+  ): Promise<RelacionApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/relaciones/${relacionId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse<RelacionApiItem>(res);
+  }
+
+  async deleteRelacion(relacionId: number): Promise<void> {
+    const res = await fetch(`${API_BASE_URL}/api/relaciones/${relacionId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    await this.handleResponse(res);
+  }
+}
+
+export const diagramaService = new DiagramaService();
