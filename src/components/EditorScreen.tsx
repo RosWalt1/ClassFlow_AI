@@ -91,10 +91,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const [relTargetMult, setRelTargetMult] = useState<string>('0..*');
   const [relName, setRelName] = useState<string>('');
 
-  // AI Assistant Chat & Voice mock state (preserved for visual fidelity and future Phase 6)
+  // AI Assistant Chat & Voice state (CU05)
   const [isAiCollapsed, setIsAiCollapsed] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
   const [aiInputText, setAiInputText] = useState<string>('');
+  const [isAiGenerating, setIsAiGenerating] = useState<boolean>(false);
   const [chatMessages, setChatMessages] = useState<
     { sender: 'user' | 'ai'; text: string; highlight?: string }[]
   >([
@@ -920,23 +921,58 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     }
   };
 
-  // Mock AI Assistant prompt submit
-  const handleAiSend = () => {
-    if (!aiInputText.trim()) return;
+  // AI Assistant prompt submit (CU05)
+  const handleAiSend = async () => {
+    if (!aiInputText.trim() || isAiGenerating) return;
+
+    if (!canEdit) {
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'user', text: aiInputText.trim() },
+        {
+          sender: 'ai',
+          text: 'Acceso denegado: Tu usuario está en modo Solo lectura y no tiene permiso para modificar el diagrama con IA.',
+          highlight: 'Solo Lectura',
+        },
+      ]);
+      setAiInputText('');
+      return;
+    }
+
+    if (!diagrama?.id_diagrama) {
+      alert('Diagrama no cargado todavía.');
+      return;
+    }
+
     const query = aiInputText.trim();
     setChatMessages((prev) => [...prev, { sender: 'user', text: query }]);
     setAiInputText('');
+    setIsAiGenerating(true);
 
-    setTimeout(() => {
+    try {
+      const res = await diagramaService.generarDiagramaIA(diagrama.id_diagrama, query);
       setChatMessages((prev) => [
         ...prev,
         {
           sender: 'ai',
-          text: `Comando recibido: "${query}". La generación inteligente por IA se activará en la Fase 6 (CU05). Actualmente el modelo está persistido en PostgreSQL.`,
-          highlight: 'Modo Persistente',
+          text: res.message || `Propuesta aplicada: ${res.created_classes?.length || 0} clases y ${res.created_relations || 0} relaciones persistidas.`,
+          highlight: 'Éxito IA',
         },
       ]);
-    }, 500);
+      // Refrescar el diagrama completo desde REST para que el canvas pinte las entidades reales persistidas
+      await loadDiagramData();
+    } catch (err: any) {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: `Error al procesar con IA: ${err.message}`,
+          highlight: 'Error',
+        },
+      ]);
+    } finally {
+      setIsAiGenerating(false);
+    }
   };
 
   // Loading state
@@ -2201,6 +2237,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                   </div>
                 ))}
 
+                {isAiGenerating && (
+                  <div className="flex items-center gap-2 p-2 bg-primary/10 rounded-lg text-primary text-xs">
+                    <span className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></span>
+                    <span>Procesando instrucción y aplicando modelo UML...</span>
+                  </div>
+                )}
+
                 {isListening && (
                   <div className="bg-secondary-container/40 p-2.5 rounded-lg space-y-1.5 border border-secondary/30">
                     <div className="flex items-center justify-between">
@@ -2224,22 +2267,35 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                       : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
                   }`}
                   title="Activar/Desactivar micrófono"
+                  disabled={!canEdit || isAiGenerating}
                 >
                   <span className="material-symbols-outlined text-[18px]">mic</span>
                 </button>
                 <input
                   type="text"
                   value={aiInputText}
+                  disabled={!canEdit || isAiGenerating}
                   onChange={(e) => setAiInputText(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAiSend()}
-                  placeholder="Instruye al asistente para modelar o refactorizar..."
-                  className="flex-1 bg-surface-container-lowest text-on-surface placeholder-outline text-xs px-3 py-1.5 rounded-lg outline-none border border-outline-variant/20 focus:border-primary"
+                  placeholder={
+                    !canEdit
+                      ? 'Modo Solo lectura (IA deshabilitada)'
+                      : isAiGenerating
+                      ? 'Generando propuesta con IA...'
+                      : 'Instruye al asistente para modelar UML...'
+                  }
+                  className="flex-1 bg-surface-container-lowest text-on-surface placeholder-outline text-xs px-3 py-1.5 rounded-lg outline-none border border-outline-variant/20 focus:border-primary disabled:opacity-50"
                 />
                 <button
                   onClick={handleAiSend}
-                  className="p-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container transition-colors shadow-sm flex items-center justify-center cursor-pointer"
+                  disabled={!canEdit || isAiGenerating || !aiInputText.trim()}
+                  className="p-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container transition-colors shadow-sm flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span className="material-symbols-outlined text-[18px]">send</span>
+                  {isAiGenerating ? (
+                    <span className="w-4 h-4 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin"></span>
+                  ) : (
+                    <span className="material-symbols-outlined text-[18px]">send</span>
+                  )}
                 </button>
               </div>
             </>

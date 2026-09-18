@@ -6,6 +6,8 @@ from app.database.session import get_db
 from app.dependencies.auth import get_current_user
 from app.models.usuario import Usuario
 from app.services.diagrama_service import DiagramaService
+from app.services.ia_service import IAService
+from app.schemas.ia import IAGenerateRequest, IAGenerateResponse
 from app.schemas.uml import (
     ClaseUMLCreate,
     ClaseUMLUpdate,
@@ -387,3 +389,28 @@ def delete_relacion(
     return DiagramaService.delete_relacion(
         db=db, relacion_id=relacion_id, user_id=current_user.id_usuario
     )
+
+
+# =============================================================================
+# INTELIGENCIA ARTIFICIAL (CU05)
+# =============================================================================
+@router.post(
+    "/diagramas/{diagrama_id}/ia/generar",
+    response_model=IAGenerateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generar y aplicar elementos UML mediante IA (CU05)",
+    description="Interpreta una instrucción en lenguaje natural, consulta a Gemini, valida el esquema UML y persiste los elementos en PostgreSQL con rollback atómico.",
+)
+def generar_diagrama_ia(
+    diagrama_id: int,
+    request: IAGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return IAService.generar_y_aplicar_propuesta(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+        prompt=request.prompt,
+    )
+

@@ -399,6 +399,26 @@ class DiagramaService {
     });
     await this.handleResponse(res);
   }
+
+  // ==========================================
+  // IA GENERATION (CU05)
+  // ==========================================
+  async generarDiagramaIA(diagramaId: number, prompt: string): Promise<{
+    success: boolean;
+    message: string;
+    prompt: string;
+    created_classes: string[];
+    created_relations: number;
+    total_classes: number;
+    total_relations: number;
+  }> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/ia/generar`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ prompt }),
+    });
+    return this.handleResponse(res);
+  }
 }
 
 export const diagramaService = new DiagramaService();
