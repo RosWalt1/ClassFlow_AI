@@ -9,6 +9,7 @@ from app.routers.health import router as health_router
 from app.routers.auth import router as auth_router
 from app.routers.proyectos import router as proyectos_router
 from app.routers.diagramas import router as diagramas_router
+from app.routers.colaboracion import router as colaboracion_router
 
 # Configure logging
 logging.basicConfig(
@@ -56,6 +57,7 @@ app.include_router(health_router, prefix=settings.API_V1_PREFIX)
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(proyectos_router, prefix=settings.API_V1_PREFIX)
 app.include_router(diagramas_router, prefix=settings.API_V1_PREFIX)
+app.include_router(colaboracion_router, prefix=settings.API_V1_PREFIX)
 # Also include /health at root for orchestrator convenience
 app.include_router(health_router)
 

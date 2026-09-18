@@ -12,6 +12,12 @@ import {
 import { ASSETS } from '../data/mockData';
 import { diagramaService, DiagramaApiItem, ClaseApiItem, RelacionApiItem } from '../services/diagramaService';
 import { proyectoService } from '../services/proyectoService';
+import {
+  collaborationService,
+  ConnectionStatus,
+  ActiveParticipant,
+  RemoteCursor,
+} from '../services/collaborationService';
 
 interface EditorScreenProps {
   onNavigate: (screen: AppScreen) => void;
@@ -100,10 +106,22 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     { sender: 'user', text: 'Crea una relación uno a muchos entre Cliente y Venta.' },
   ]);
 
-  // Toast collaborator state
+  // Toast collaborator state & real-time presence
   const [showCollabToast, setShowCollabToast] = useState<boolean>(false);
+  const [collabToastMessage, setCollabToastMessage] = useState<{
+    text: string;
+    subtext: string;
+    name: string;
+    isJoin: boolean;
+  } | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+
+  // Real-time WebSocket collaboration state (CU04)
+  const [wsStatus, setWsStatus] = useState<ConnectionStatus>('disconnected');
+  const [activeParticipants, setActiveParticipants] = useState<ActiveParticipant[]>([]);
+  const [sessionCode, setSessionCode] = useState<string>('');
+  const [remoteCursors, setRemoteCursors] = useState<Record<number, RemoteCursor>>({});
 
   // Determine permissions
   const canEdit = Boolean(diagrama?.permiso_edicion);
@@ -208,6 +226,98 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   useEffect(() => {
     loadDiagramData();
   }, [loadDiagramData]);
+
+  // =========================================================================
+  // WEBSOCKET REAL-TIME COLLABORATION (CU04)
+  // =========================================================================
+  useEffect(() => {
+    if (!diagrama?.id_diagrama) return;
+
+    collaborationService.connect(diagrama.id_diagrama);
+
+    const reloadDiagramFromRest = async () => {
+      if (!diagrama?.id_diagrama) return;
+      try {
+        const fullDiagram = await diagramaService.getDiagrama(diagrama.id_diagrama);
+        const mappedClasses = (fullDiagram.clases || []).map(mapApiClassToNode);
+        const mappedRelations = (fullDiagram.relaciones || []).map(mapApiRelToUml);
+        setClasses(mappedClasses);
+        setRelations(mappedRelations);
+      } catch (err) {
+        console.error('[Collab] Error refrescando diagrama tras diagram.changed:', err);
+      }
+    };
+
+    const unsubStatus = collaborationService.onStatusChange((newStatus) => {
+      setWsStatus(newStatus);
+      if (newStatus === 'connected') {
+        reloadDiagramFromRest();
+      }
+    });
+
+    const unsubInit = collaborationService.on('session.init', (e: any) => {
+      if (e.active_participants) {
+        setActiveParticipants(e.active_participants);
+      }
+      if (e.session_code) {
+        setSessionCode(e.session_code);
+      }
+    });
+
+    const unsubJoin = collaborationService.on('presence.join', (e: any) => {
+      if (e.user) {
+        setActiveParticipants((prev) => {
+          if (prev.some((p) => p.id_usuario === e.user.id_usuario)) {
+            return prev;
+          }
+          return [...prev, e.user];
+        });
+        setCollabToastMessage({
+          name: e.user.nombre,
+          text: 'Colaborador Conectado',
+          subtext: `${e.user.nombre} se ha unido a la sesión`,
+          isJoin: true,
+        });
+        setShowCollabToast(true);
+        setTimeout(() => setShowCollabToast(false), 3500);
+      }
+    });
+
+    const unsubLeave = collaborationService.on('presence.leave', (e: any) => {
+      if (e.user_id) {
+        setActiveParticipants((prev) => {
+          const departing = prev.find((p) => p.id_usuario === e.user_id);
+          if (departing) {
+            setCollabToastMessage({
+              name: departing.nombre,
+              text: 'Colaborador Desconectado',
+              subtext: `${departing.nombre} ha salido de la sesión`,
+              isJoin: false,
+            });
+            setShowCollabToast(true);
+            setTimeout(() => setShowCollabToast(false), 3500);
+          }
+          return prev.filter((p) => p.id_usuario !== e.user_id);
+        });
+      }
+    });
+
+    // CU04: Escuchar diagram.changed para recargar automáticamente desde REST
+    const unsubDiagramChanged = collaborationService.on('diagram.changed', (e: any) => {
+      if (e.diagram_id === diagrama.id_diagrama) {
+        reloadDiagramFromRest();
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubInit();
+      unsubJoin();
+      unsubLeave();
+      unsubDiagramChanged();
+      collaborationService.disconnect();
+    };
+  }, [diagrama?.id_diagrama]);
 
   // Selected class helper
   const selectedClass = classes.find((c) => c.id === selectedClassId) || classes[0];
@@ -694,6 +804,69 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               {diagrama?.nombre || 'Diagrama Principal'}
             </span>
           </div>
+
+          {/* Real-time Collaboration Status Badge */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-low shadow-sm border border-outline-variant/30">
+            <span
+              className={`material-symbols-outlined text-[15px] ${
+                wsStatus === 'connected'
+                  ? 'text-tertiary'
+                  : wsStatus === 'connecting' || wsStatus === 'reconnecting'
+                  ? 'text-primary animate-spin'
+                  : 'text-error'
+              }`}
+            >
+              {wsStatus === 'connected'
+                ? 'sensors'
+                : wsStatus === 'connecting' || wsStatus === 'reconnecting'
+                ? 'sync'
+                : 'sensors_off'}
+            </span>
+            <span
+              className={`font-mono text-[11px] font-medium ${
+                wsStatus === 'connected'
+                  ? 'text-tertiary'
+                  : wsStatus === 'connecting' || wsStatus === 'reconnecting'
+                  ? 'text-primary'
+                  : 'text-error'
+              }`}
+            >
+              {wsStatus === 'connected'
+                ? `En vivo • ${activeParticipants.length} online`
+                : wsStatus === 'connecting'
+                ? 'Conectando...'
+                : wsStatus === 'reconnecting'
+                ? 'Reconectando...'
+                : 'Desconectado'}
+            </span>
+          </div>
+
+          {/* Active Participants Avatars Stack in Toolbar */}
+          {activeParticipants.length > 0 && (
+            <div className="hidden md:flex items-center -space-x-2 overflow-hidden py-0.5">
+              {activeParticipants.slice(0, 4).map((p) => (
+                <div
+                  key={p.id_usuario}
+                  className="relative group/avatar cursor-pointer"
+                  title={`${p.nombre} (${p.es_propietario ? 'Propietario' : p.permiso_edicion ? 'Editor' : 'Lector'})`}
+                >
+                  <div className="w-7 h-7 rounded-full ring-2 ring-surface bg-primary-container text-on-primary-container flex items-center justify-center text-[11px] font-bold uppercase shadow-sm">
+                    {p.nombre.charAt(0)}
+                  </div>
+                  <span
+                    className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ring-1 ring-surface ${
+                      p.permiso_edicion ? 'bg-tertiary' : 'bg-amber-400'
+                    }`}
+                  />
+                </div>
+              ))}
+              {activeParticipants.length > 4 && (
+                <div className="w-7 h-7 rounded-full ring-2 ring-surface bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[10px] font-mono font-semibold">
+                  +{activeParticipants.length - 4}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Sync Status Badge */}
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-low shadow-sm">
@@ -1701,21 +1874,23 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           )}
         </div>
 
-        {/* COLLABORATION POPUP TOAST (CORNER OVERLAY) */}
-        {showCollabToast && (
-          <div className="absolute left-20 bottom-4 z-30 flex items-center gap-3 bg-surface-container-high/95 backdrop-blur-md px-4 py-2.5 rounded-xl shadow-2xl border border-outline-variant/30">
+        {/* REAL COLLABORATION POPUP TOAST */}
+        {showCollabToast && collabToastMessage && (
+          <div className="absolute left-20 bottom-4 z-30 flex items-center gap-3 bg-surface-container-high/95 backdrop-blur-md px-4 py-2.5 rounded-xl shadow-2xl border border-outline-variant/30 animate-in fade-in slide-in-from-bottom-2">
             <div className="relative">
-              <img
-                className="w-7 h-7 rounded-full object-cover"
-                src={ASSETS.anaLopezAlt}
-                alt="Ana López"
-              />
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-tertiary ring-1 ring-surface-container-high"></span>
+              <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs">
+                {collabToastMessage.name.charAt(0)}
+              </div>
+              <span
+                className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full ring-1 ring-surface-container-high ${
+                  collabToastMessage.isJoin ? 'bg-tertiary' : 'bg-outline'
+                }`}
+              ></span>
             </div>
             <div className="flex flex-col">
-              <span className="text-xs font-semibold text-on-surface">Colaborador Conectado</span>
+              <span className="text-xs font-semibold text-on-surface">{collabToastMessage.text}</span>
               <span className="text-[11px] text-on-surface-variant">
-                Sesión sincronizada con PostgreSQL
+                {collabToastMessage.subtext}
               </span>
             </div>
             <button
@@ -1860,6 +2035,18 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
+            <div className="flex flex-col gap-2 p-3 rounded-lg bg-surface-container border border-outline-variant/30">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-on-surface">Código de Sesión Colaborativa:</span>
+                <span className="font-mono text-xs font-bold text-primary px-2 py-0.5 rounded bg-primary/10">
+                  {sessionCode || 'Activa'}
+                </span>
+              </div>
+              <div className="text-[11px] text-on-surface-variant">
+                Participantes activos: {activeParticipants.map((p) => p.nombre).join(', ') || 'Solo tú'}
+              </div>
+            </div>
+
             <p className="text-xs text-on-surface-variant">
               Gestiona los colaboradores con permisos de lectura o edición desde la pantalla de Proyectos.
             </p>

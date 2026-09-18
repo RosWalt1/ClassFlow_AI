@@ -49,6 +49,22 @@ def get_diagrama_proyecto(
     )
 
 
+@router.get(
+    "/diagramas/{diagrama_id}",
+    response_model=DiagramaResponse,
+    summary="Obtener diagrama por ID",
+    description="Retorna el diagrama UML completo con clases, atributos, métodos, parámetros y relaciones.",
+)
+def get_diagrama(
+    diagrama_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return DiagramaService.get_diagrama_by_id(
+        db=db, diagrama_id=diagrama_id, user_id=current_user.id_usuario
+    )
+
+
 @router.put(
     "/diagramas/{diagrama_id}",
     response_model=DiagramaResponse,

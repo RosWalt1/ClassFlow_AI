@@ -110,6 +110,14 @@ class DiagramaService {
   // =========================================================================
   // DIAGRAMA
   // =========================================================================
+  async getDiagrama(diagramaId: number): Promise<DiagramaApiItem> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse<DiagramaApiItem>(res);
+  }
+
   async getDiagramaProyecto(proyectoId: number): Promise<DiagramaApiItem> {
     const res = await fetch(`${API_BASE_URL}/api/proyectos/${proyectoId}/diagrama`, {
       method: 'GET',

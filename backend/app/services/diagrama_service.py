@@ -8,6 +8,7 @@ from app.models.proyecto import Proyecto, ProyectoColaborador
 from app.models.diagrama import Diagrama
 from app.models.uml import ClaseUML, AtributoUML, MetodoUML, ParametroUML, RelacionUML
 from app.services.proyecto_service import ESTADOS_COLABORADOR_ACTIVO
+from app.core.ws_manager import ws_manager
 from app.schemas.uml import (
     TIPOS_RELACION_VALIDOS,
     ClaseUMLCreate,
@@ -104,6 +105,19 @@ class DiagramaService:
 
         return diagrama, es_propietario, permiso_edicion
 
+    @classmethod
+    def _notify_diagram_changed(cls, diagrama_id: int, user_id: int) -> None:
+        """Emite evento diagram.changed tras confirmar persistencia en PostgreSQL."""
+        ws_manager.broadcast_sync(
+            diagrama_id,
+            {
+                "type": "diagram.changed",
+                "diagram_id": diagrama_id,
+                "actor_id": user_id,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
     # =========================================================================
     # DIAGRAMA CORE
     # =========================================================================
@@ -169,6 +183,16 @@ class DiagramaService:
         db.refresh(diagrama)
         return cls._build_diagrama_response(diagrama, es_propietario, True)
 
+    @classmethod
+    def get_diagrama_by_id(
+        cls, db: Session, diagrama_id: int, user_id: int
+    ) -> DiagramaResponse:
+        """Consulta el diagrama completo por su ID de diagrama."""
+        diagrama, _, _ = cls.get_diagrama_permiso(
+            db, diagrama_id, user_id, require_edit=False
+        )
+        return cls.get_or_create_diagrama(db, diagrama.id_proyecto, user_id)
+
     # =========================================================================
     # CLASES UML
     # =========================================================================
@@ -221,7 +245,9 @@ class DiagramaService:
         db.commit()
         db.refresh(nueva_clase)
 
-        return cls._to_clase_response(nueva_clase)
+        resp = cls._to_clase_response(nueva_clase)
+        cls._notify_diagram_changed(diagrama_id, user_id)
+        return resp
 
     @classmethod
     def get_clase(cls, db: Session, diagrama_id: int, clase_id: int, user_id: int) -> ClaseUMLResponse:
@@ -300,7 +326,9 @@ class DiagramaService:
         diagrama.fecha_modificacion = now
         db.commit()
         db.refresh(clase)
-        return cls._to_clase_response(clase)
+        resp = cls._to_clase_response(clase)
+        cls._notify_diagram_changed(diagrama_id, user_id)
+        return resp
 
     @classmethod
     def update_clase_posicion(
@@ -327,7 +355,9 @@ class DiagramaService:
         diagrama.fecha_modificacion = now
         db.commit()
         db.refresh(clase)
-        return cls._to_clase_response(clase)
+        resp = cls._to_clase_response(clase)
+        cls._notify_diagram_changed(diagrama_id, user_id)
+        return resp
 
     @classmethod
     def delete_clase(
@@ -368,6 +398,8 @@ class DiagramaService:
         db.delete(clase)
         diagrama.fecha_modificacion = datetime.now()
         db.commit()
+
+        cls._notify_diagram_changed(diagrama_id, user_id)
 
         return {
             "message": "Clase UML eliminada correctamente.",
@@ -414,7 +446,9 @@ class DiagramaService:
         clase.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(nuevo_attr)
-        return AtributoUMLResponse.model_validate(nuevo_attr)
+        resp = AtributoUMLResponse.model_validate(nuevo_attr)
+        cls._notify_diagram_changed(clase.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def update_atributo(
@@ -469,7 +503,9 @@ class DiagramaService:
         clase.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(attr)
-        return AtributoUMLResponse.model_validate(attr)
+        resp = AtributoUMLResponse.model_validate(attr)
+        cls._notify_diagram_changed(clase.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def delete_atributo(cls, db: Session, atributo_id: int, user_id: int) -> dict:
@@ -488,14 +524,18 @@ class DiagramaService:
             )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
+        diag_id = clase.id_diagrama
+        clase_id_val = clase.id_clase
         db.delete(attr)
         clase.fecha_modificacion = datetime.now()
         db.commit()
 
+        cls._notify_diagram_changed(diag_id, user_id)
+
         return {
             "message": "Atributo UML eliminado correctamente.",
             "id_atributo": atributo_id,
-            "id_clase": clase.id_clase,
+            "id_clase": clase_id_val,
         }
 
     # =========================================================================
@@ -534,7 +574,9 @@ class DiagramaService:
         clase.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(nuevo_metodo)
-        return MetodoUMLResponse.model_validate(nuevo_metodo)
+        resp = MetodoUMLResponse.model_validate(nuevo_metodo)
+        cls._notify_diagram_changed(clase.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def update_metodo(
@@ -578,7 +620,9 @@ class DiagramaService:
         clase.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(metodo)
-        return MetodoUMLResponse.model_validate(metodo)
+        resp = MetodoUMLResponse.model_validate(metodo)
+        cls._notify_diagram_changed(clase.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def delete_metodo(cls, db: Session, metodo_id: int, user_id: int) -> dict:
@@ -597,14 +641,18 @@ class DiagramaService:
             )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
+        diag_id = clase.id_diagrama
+        clase_id_val = clase.id_clase
         db.delete(metodo)
         clase.fecha_modificacion = datetime.now()
         db.commit()
 
+        cls._notify_diagram_changed(diag_id, user_id)
+
         return {
             "message": "Método UML eliminado correctamente.",
             "id_metodo": metodo_id,
-            "id_clase": clase.id_clase,
+            "id_clase": clase_id_val,
         }
 
     @classmethod
@@ -645,7 +693,9 @@ class DiagramaService:
         clase.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(nuevo_param)
-        return ParametroUMLResponse.model_validate(nuevo_param)
+        resp = ParametroUMLResponse.model_validate(nuevo_param)
+        cls._notify_diagram_changed(clase.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def update_parametro(
@@ -698,7 +748,9 @@ class DiagramaService:
         clase.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(param)
-        return ParametroUMLResponse.model_validate(param)
+        resp = ParametroUMLResponse.model_validate(param)
+        cls._notify_diagram_changed(clase.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def delete_parametro(cls, db: Session, parametro_id: int, user_id: int) -> dict:
@@ -723,14 +775,19 @@ class DiagramaService:
             )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
+        diag_id = clase.id_diagrama
+        clase_id_val = clase.id_clase
+        metodo_id_val = metodo.id_metodo
         db.delete(param)
         clase.fecha_modificacion = datetime.now()
         db.commit()
 
+        cls._notify_diagram_changed(diag_id, user_id)
+
         return {
             "message": "Parámetro UML eliminado correctamente.",
             "id_parametro": parametro_id,
-            "id_metodo": metodo.id_metodo,
+            "id_metodo": metodo_id_val,
         }
 
     # =========================================================================
@@ -793,7 +850,9 @@ class DiagramaService:
         diagrama.fecha_modificacion = now
         db.commit()
         db.refresh(nueva_rel)
-        return RelacionUMLResponse.model_validate(nueva_rel)
+        resp = RelacionUMLResponse.model_validate(nueva_rel)
+        cls._notify_diagram_changed(diagrama_id, user_id)
+        return resp
 
     @classmethod
     def update_relacion(
@@ -837,7 +896,9 @@ class DiagramaService:
         diagrama.fecha_modificacion = datetime.now()
         db.commit()
         db.refresh(rel)
-        return RelacionUMLResponse.model_validate(rel)
+        resp = RelacionUMLResponse.model_validate(rel)
+        cls._notify_diagram_changed(diagrama.id_diagrama, user_id)
+        return resp
 
     @classmethod
     def delete_relacion(cls, db: Session, relacion_id: int, user_id: int) -> dict:
@@ -852,14 +913,17 @@ class DiagramaService:
             db, rel.id_diagrama, user_id, require_edit=True
         )
 
+        diag_id = diagrama.id_diagrama
         db.delete(rel)
         diagrama.fecha_modificacion = datetime.now()
         db.commit()
 
+        cls._notify_diagram_changed(diag_id, user_id)
+
         return {
             "message": "Relación UML eliminada correctamente.",
             "id_relacion": relacion_id,
-            "id_diagrama": diagrama.id_diagrama,
+            "id_diagrama": diag_id,
         }
 
     # =========================================================================
