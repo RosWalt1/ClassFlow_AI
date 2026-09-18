@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,6 +24,24 @@ class Settings(BaseSettings):
     # Database: Loaded exclusively from backend/.env or environment variables.
     # Default value is a strictly fictitious placeholder without real credentials.
     DATABASE_URL: str = "postgresql+psycopg://usuario:password@localhost:5432/classflow_ai"
+    TEST_DATABASE_URL: Optional[str] = None
+
+    def get_test_database_url(self) -> str:
+        """Retorna la URL de conexion a la base de datos de pruebas (classflow_ai_test).
+        Si TEST_DATABASE_URL esta configurada explicitamente, se utiliza directamente.
+        De lo contrario, se deriva de DATABASE_URL reemplazando el nombre de la base de datos.
+        """
+        if self.TEST_DATABASE_URL and self.TEST_DATABASE_URL.strip():
+            return self.TEST_DATABASE_URL.strip()
+        base_url = self.DATABASE_URL
+        if "/classflow_ai" in base_url:
+            return base_url.replace("/classflow_ai", "/classflow_ai_test")
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(base_url)
+        path = parsed.path
+        if not path.endswith("_test"):
+            path = path + "_test"
+        return urlunparse(parsed._replace(path=path))
 
     # JWT Authentication: Obligatoria desde backend/.env o variables de entorno.
     # No se permite ninguna clave secreta funcional en código versionado.

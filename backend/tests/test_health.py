@@ -21,7 +21,7 @@ def test_health_endpoint():
     assert data["status"] == "ok"
     assert data["project"] == "ClassFlow AI API"
     assert data["database"]["status"] == "connected"
-    assert data["database"]["database"] == "classflow_ai"
+    assert data["database"]["database"] in ("classflow_ai", "classflow_ai_test")
     assert data["database"]["version"] is not None
 
 
