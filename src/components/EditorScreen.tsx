@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { AppScreen, UMLAttribute, UMLClassNode, UMLMethod, UMLRelation, UserProfile } from '../types';
+import {
+  AppScreen,
+  CanonicalUMLRelationType,
+  toCanonicalRelationType,
+  UMLAttribute,
+  UMLClassNode,
+  UMLMethod,
+  UMLRelation,
+  UserProfile,
+} from '../types';
 import { ASSETS } from '../data/mockData';
 import { diagramaService, DiagramaApiItem, ClaseApiItem, RelacionApiItem } from '../services/diagramaService';
 import { proyectoService } from '../services/proyectoService';
@@ -69,7 +78,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
   // Modal to create Relation
   const [isRelationModalOpen, setIsRelationModalOpen] = useState<boolean>(false);
-  const [relType, setRelType] = useState<string>('asociacion');
+  const [relType, setRelType] = useState<CanonicalUMLRelationType>('asociacion');
   const [relTargetId, setRelTargetId] = useState<string>('');
   const [relSourceMult, setRelSourceMult] = useState<string>('1');
   const [relTargetMult, setRelTargetMult] = useState<string>('0..*');
@@ -132,7 +141,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     id: r.id_relacion.toString(),
     sourceId: r.id_clase_origen.toString(),
     targetId: r.id_clase_destino.toString(),
-    type: r.tipo as any,
+    type: toCanonicalRelationType(r.tipo),
     sourceMultiplicity: r.multiplicidad_origen || '1',
     targetMultiplicity: r.multiplicidad_destino || '1',
     roleName: r.nombre || r.rol_destino || '',
@@ -559,7 +568,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   // =========================================================================
   // RELACIONES OPERATIONS (CRUD)
   // =========================================================================
-  const handleOpenRelationModal = (type: string) => {
+  const handleOpenRelationModal = (type: CanonicalUMLRelationType | string) => {
     if (!canEdit) {
       alert('Modo solo lectura: No tienes permisos para crear relaciones.');
       return;
@@ -569,7 +578,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       return;
     }
     const otherClasses = classes.filter((c) => c.id !== selectedClassId);
-    setRelType(type);
+    setRelType(toCanonicalRelationType(type));
     setRelTargetId(otherClasses.length > 0 ? otherClasses[0].id : '');
     setRelSourceMult('1');
     setRelTargetMult('0..*');
@@ -583,10 +592,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
     try {
       setSaveStatus('guardando');
+      const canonicalType = toCanonicalRelationType(relType);
       const created = await diagramaService.createRelacion(diagrama.id_diagrama, {
         id_clase_origen: parseInt(selectedClassId, 10),
         id_clase_destino: parseInt(relTargetId, 10),
-        tipo: relType,
+        tipo: canonicalType,
         nombre: relName.trim() || undefined,
         multiplicidad_origen: relSourceMult.trim() || undefined,
         multiplicidad_destino: relTargetMult.trim() || undefined,
@@ -1768,7 +1778,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 <label className="text-xs text-outline block mb-1">Tipo de Relación</label>
                 <select
                   value={relType}
-                  onChange={(e) => setRelType(e.target.value)}
+                  onChange={(e) => setRelType(toCanonicalRelationType(e.target.value))}
                   className="w-full bg-surface-container-lowest text-on-surface text-xs p-2 rounded border border-outline-variant/30 outline-none"
                 >
                   <option value="asociacion">Asociación Directa (---)</option>

@@ -428,6 +428,11 @@ class DiagramaService:
             )
 
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == attr.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         if data.nombre is not None:
@@ -476,6 +481,11 @@ class DiagramaService:
             )
 
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == attr.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         db.delete(attr)
@@ -538,6 +548,11 @@ class DiagramaService:
             )
 
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == metodo.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         if data.nombre is not None:
@@ -575,6 +590,11 @@ class DiagramaService:
             )
 
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == metodo.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         db.delete(metodo)
@@ -599,6 +619,11 @@ class DiagramaService:
             )
 
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == metodo.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         nombre_limpio = data.nombre.strip()
@@ -634,7 +659,17 @@ class DiagramaService:
             )
 
         metodo = db.query(MetodoUML).filter(MetodoUML.id_metodo == param.id_metodo).first()
+        if not metodo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Método UML no encontrado.",
+            )
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == metodo.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         if data.nombre is not None:
@@ -675,7 +710,17 @@ class DiagramaService:
             )
 
         metodo = db.query(MetodoUML).filter(MetodoUML.id_metodo == param.id_metodo).first()
+        if not metodo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Método UML no encontrado.",
+            )
         clase = db.query(ClaseUML).filter(ClaseUML.id_clase == metodo.id_clase).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase UML no encontrada.",
+            )
         cls.get_diagrama_permiso(db, clase.id_diagrama, user_id, require_edit=True)
 
         db.delete(param)

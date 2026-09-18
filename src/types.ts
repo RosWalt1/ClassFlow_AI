@@ -38,23 +38,57 @@ export interface UMLClassNode {
   isConcrete?: boolean;
 }
 
+// Tipos oficiales canónicos de relaciones UML según modelo persistente de ClassFlow AI
+export type CanonicalUMLRelationType =
+  | 'asociacion'
+  | 'agregacion'
+  | 'composicion'
+  | 'herencia'
+  | 'dependencia'
+  | 'realizacion';
+
+// Tipos legados en inglés (admitidos únicamente por compatibilidad con mocks de fases posteriores)
+export type LegacyUMLRelationType =
+  | 'association'
+  | 'aggregation'
+  | 'composition'
+  | 'inheritance'
+  | 'dependency'
+  | 'realization';
+
+export type UMLRelationType = CanonicalUMLRelationType | LegacyUMLRelationType;
+
+export const toCanonicalRelationType = (type: string): CanonicalUMLRelationType => {
+  const norm = type.trim().toLowerCase();
+  switch (norm) {
+    case 'association':
+    case 'asociacion':
+      return 'asociacion';
+    case 'aggregation':
+    case 'agregacion':
+      return 'agregacion';
+    case 'composition':
+    case 'composicion':
+      return 'composicion';
+    case 'inheritance':
+    case 'herencia':
+      return 'herencia';
+    case 'dependency':
+    case 'dependencia':
+      return 'dependencia';
+    case 'realization':
+    case 'realizacion':
+      return 'realizacion';
+    default:
+      return 'asociacion';
+  }
+};
+
 export interface UMLRelation {
   id: string;
   sourceId: string;
   targetId: string;
-  type:
-    | 'association'
-    | 'aggregation'
-    | 'composition'
-    | 'inheritance'
-    | 'dependency'
-    | 'realization'
-    | 'asociacion'
-    | 'agregacion'
-    | 'composicion'
-    | 'herencia'
-    | 'dependencia'
-    | 'realizacion';
+  type: UMLRelationType;
   sourceMultiplicity: string;
   targetMultiplicity: string;
   roleName?: string;

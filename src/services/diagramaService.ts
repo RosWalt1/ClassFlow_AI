@@ -1,4 +1,5 @@
 import { authService } from './authService';
+import { CanonicalUMLRelationType } from '../types';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
@@ -58,7 +59,7 @@ export interface RelacionApiItem {
   id_diagrama: number;
   id_clase_origen: number;
   id_clase_destino: number;
-  tipo: string;
+  tipo: CanonicalUMLRelationType;
   nombre?: string | null;
   multiplicidad_origen?: string | null;
   multiplicidad_destino?: string | null;
@@ -344,7 +345,7 @@ class DiagramaService {
     data: {
       id_clase_origen: number;
       id_clase_destino: number;
-      tipo: string;
+      tipo: CanonicalUMLRelationType;
       nombre?: string;
       multiplicidad_origen?: string;
       multiplicidad_destino?: string;
@@ -365,7 +366,7 @@ class DiagramaService {
   async updateRelacion(
     relacionId: number,
     data: {
-      tipo?: string;
+      tipo?: CanonicalUMLRelationType;
       nombre?: string;
       multiplicidad_origen?: string;
       multiplicidad_destino?: string;

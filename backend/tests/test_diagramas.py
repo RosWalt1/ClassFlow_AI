@@ -687,3 +687,261 @@ def test_integridad_al_eliminar_clase_con_relaciones_y_elementos(tokens):
     assert not any(c["id_clase"] == c1 for c in diag_after["clases"])
     assert not any(r["id_relacion"] == rel_id for r in diag_after["relaciones"])
     assert any(c["id_clase"] == c2 for c in diag_after["clases"])
+
+
+# =============================================================================
+# 7. AISLAMIENTO CRUZADO JERÁRQUICO POR ID ENTRE PROYECTOS DISTINTOS
+# =============================================================================
+def test_aislamiento_cruzado_proyectos(tokens):
+    """
+    Verifica que un usuario con acceso al Proyecto A NO pueda modificar ni eliminar
+    atributos, métodos, parámetros, relaciones o clases del Proyecto B simplemente conociendo su ID.
+    El servicio debe derivar toda la cadena de pertenencia jerárquica:
+    recurso -> clase/método -> diagrama -> proyecto -> autorización (403 Forbidden).
+    """
+    headers_carlos = {"Authorization": f"Bearer {tokens['carlos']}"}
+    headers_luis = {"Authorization": f"Bearer {tokens['luis']}"}
+
+    # Carlos crea Proyecto B y todos sus elementos internos
+    proj_b = client.post(
+        "/api/proyectos",
+        json={"nombre": "[TEST-ISOLATION] Proyecto B de Carlos"},
+        headers=headers_carlos,
+    ).json()
+    diag_b = client.get(f"/api/proyectos/{proj_b['id_proyecto']}/diagrama", headers=headers_carlos).json()
+    diag_b_id = diag_b["id_diagrama"]
+
+    # Clases en Proyecto B
+    clase_b1 = client.post(
+        f"/api/diagramas/{diag_b_id}/clases",
+        json={"nombre": "EntidadB1", "posicion_x": 100, "posicion_y": 100},
+        headers=headers_carlos,
+    ).json()["id_clase"]
+
+    clase_b2 = client.post(
+        f"/api/diagramas/{diag_b_id}/clases",
+        json={"nombre": "EntidadB2", "posicion_x": 400, "posicion_y": 100},
+        headers=headers_carlos,
+    ).json()["id_clase"]
+
+    # Atributo en clase_b1
+    attr_b = client.post(
+        f"/api/clases/{clase_b1}/atributos",
+        json={"nombre": "secretoB", "tipo_dato": "String", "visibilidad": "private"},
+        headers=headers_carlos,
+    ).json()["id_atributo"]
+
+    # Método en clase_b1
+    met_b = client.post(
+        f"/api/clases/{clase_b1}/metodos",
+        json={"nombre": "operacionB", "tipo_retorno": "void", "visibilidad": "public"},
+        headers=headers_carlos,
+    ).json()["id_metodo"]
+
+    # Parámetro en met_b
+    param_b = client.post(
+        f"/api/metodos/{met_b}/parametros",
+        json={"nombre": "argB", "tipo_dato": "int"},
+        headers=headers_carlos,
+    ).json()["id_parametro"]
+
+    # Relación entre clase_b1 y clase_b2
+    rel_b = client.post(
+        f"/api/diagramas/{diag_b_id}/relaciones",
+        json={"id_clase_origen": clase_b1, "id_clase_destino": clase_b2, "tipo": "composicion"},
+        headers=headers_carlos,
+    ).json()["id_relacion"]
+
+    # Luis (que no tiene acceso a Proyecto B) intenta mutar elementos de Proyecto B por ID:
+
+    # 1. Actualizar y eliminar atributo de Proyecto B -> Rechazado (403)
+    res_up_attr = client.put(
+        f"/api/atributos/{attr_b}",
+        json={"nombre": "hackeado"},
+        headers=headers_luis,
+    )
+    assert res_up_attr.status_code == 403
+    assert "no tienes permiso" in res_up_attr.json()["detail"].lower()
+
+    res_del_attr = client.delete(
+        f"/api/atributos/{attr_b}",
+        headers=headers_luis,
+    )
+    assert res_del_attr.status_code == 403
+
+    # 2. Actualizar y eliminar método de Proyecto B -> Rechazado (403)
+    res_up_met = client.put(
+        f"/api/metodos/{met_b}",
+        json={"nombre": "hackMetodo"},
+        headers=headers_luis,
+    )
+    assert res_up_met.status_code == 403
+
+    res_del_met = client.delete(
+        f"/api/metodos/{met_b}",
+        headers=headers_luis,
+    )
+    assert res_del_met.status_code == 403
+
+    # 3. Crear, actualizar y eliminar parámetro de Proyecto B -> Rechazado (403)
+    res_create_param = client.post(
+        f"/api/metodos/{met_b}/parametros",
+        json={"nombre": "hackedParam", "tipo_dato": "String"},
+        headers=headers_luis,
+    )
+    assert res_create_param.status_code == 403
+
+    res_up_param = client.put(
+        f"/api/parametros/{param_b}",
+        json={"nombre": "hackParam"},
+        headers=headers_luis,
+    )
+    assert res_up_param.status_code == 403
+
+    res_del_param = client.delete(
+        f"/api/parametros/{param_b}",
+        headers=headers_luis,
+    )
+    assert res_del_param.status_code == 403
+
+    # 4. Actualizar y eliminar relación de Proyecto B -> Rechazado (403)
+    res_up_rel = client.put(
+        f"/api/relaciones/{rel_b}",
+        json={"tipo": "asociacion"},
+        headers=headers_luis,
+    )
+    assert res_up_rel.status_code == 403
+
+    res_del_rel = client.delete(
+        f"/api/relaciones/{rel_b}",
+        headers=headers_luis,
+    )
+    assert res_del_rel.status_code == 403
+
+    # 5. Modificar y eliminar clase de Proyecto B -> Rechazado (403)
+    res_up_clase = client.put(
+        f"/api/diagramas/{diag_b_id}/clases/{clase_b1}",
+        json={"nombre": "HackClass"},
+        headers=headers_luis,
+    )
+    assert res_up_clase.status_code == 403
+
+    res_del_clase = client.delete(
+        f"/api/diagramas/{diag_b_id}/clases/{clase_b1}",
+        headers=headers_luis,
+    )
+    assert res_del_clase.status_code == 403
+
+
+# =============================================================================
+# 8. VERIFICACIÓN DE LOS SEIS TIPOS OFICIALES Y RECHAZO DE TIPOS INVÁLIDOS/INGLESES
+# =============================================================================
+def test_verificar_los_seis_tipos_oficiales_y_rechazo_invalidos(tokens):
+    """
+    Verifica que la API:
+    1. Acepta y persiste exactamente los 6 tipos oficiales en español:
+       asociacion, agregacion, composicion, herencia, dependencia, realizacion.
+    2. Rechaza cualquier tipo arbitrario con 400 Bad Request.
+    3. Rechaza nombres en inglés (association, composition, etc.) con 400 Bad Request.
+    4. Confirma que la BD nunca persiste nombres en inglés.
+    """
+    headers = {"Authorization": f"Bearer {tokens['carlos']}"}
+
+    proj = client.post(
+        "/api/proyectos",
+        json={"nombre": "[TEST-6-TYPES] Verificación Tipos UML"},
+        headers=headers,
+    ).json()
+    diag = client.get(f"/api/proyectos/{proj['id_proyecto']}/diagrama", headers=headers).json()
+    diag_id = diag["id_diagrama"]
+
+    # Crear 2 clases
+    c1 = client.post(
+        f"/api/diagramas/{diag_id}/clases",
+        json={"nombre": "ClaseUno", "posicion_x": 50, "posicion_y": 50},
+        headers=headers,
+    ).json()["id_clase"]
+
+    c2 = client.post(
+        f"/api/diagramas/{diag_id}/clases",
+        json={"nombre": "ClaseDos", "posicion_x": 350, "posicion_y": 50},
+        headers=headers,
+    ).json()["id_clase"]
+
+    tipos_oficiales = [
+        "asociacion",
+        "agregacion",
+        "composicion",
+        "herencia",
+        "dependencia",
+        "realizacion",
+    ]
+
+    # Probar creación para cada uno de los 6 tipos oficiales
+    created_rel_ids = []
+    for tipo in tipos_oficiales:
+        res = client.post(
+            f"/api/diagramas/{diag_id}/relaciones",
+            json={
+                "id_clase_origen": c1,
+                "id_clase_destino": c2,
+                "tipo": tipo,
+                "nombre": f"rel_{tipo}",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 201, f"Fallo al crear tipo oficial {tipo}: {res.text}"
+        data = res.json()
+        assert data["tipo"] == tipo
+        created_rel_ids.append(data["id_relacion"])
+
+    # Probar rechazo de tipo arbitrario / inválido
+    res_invalido = client.post(
+        f"/api/diagramas/{diag_id}/relaciones",
+        json={
+            "id_clase_origen": c1,
+            "id_clase_destino": c2,
+            "tipo": "tipo_totalmente_invalido",
+        },
+        headers=headers,
+    )
+    assert res_invalido.status_code == 400
+    assert "tipo de relación no válido" in res_invalido.json()["detail"].lower()
+
+    # Probar rechazo de tipos en inglés
+    tipos_ingleses = [
+        "association",
+        "aggregation",
+        "composition",
+        "inheritance",
+        "dependency",
+        "realization",
+    ]
+    for tipo_en in tipos_ingleses:
+        res_en = client.post(
+            f"/api/diagramas/{diag_id}/relaciones",
+            json={
+                "id_clase_origen": c1,
+                "id_clase_destino": c2,
+                "tipo": tipo_en,
+            },
+            headers=headers,
+        )
+        assert res_en.status_code == 400, f"Debería haber rechazado tipo en inglés {tipo_en}"
+        assert "tipo de relación no válido" in res_en.json()["detail"].lower()
+
+    # Probar rechazo al actualizar a tipo en inglés
+    rel_prueba = created_rel_ids[0]
+    res_up_en = client.put(
+        f"/api/relaciones/{rel_prueba}",
+        json={"tipo": "association"},
+        headers=headers,
+    )
+    assert res_up_en.status_code == 400
+    assert "tipo de relación no válido" in res_up_en.json()["detail"].lower()
+
+    # Verificar que el diagrama persistido solo tiene tipos canónicos en español
+    diag_check = client.get(f"/api/proyectos/{proj['id_proyecto']}/diagrama", headers=headers).json()
+    for rel in diag_check["relaciones"]:
+        assert rel["tipo"] in tipos_oficiales
+        assert rel["tipo"] not in tipos_ingleses
