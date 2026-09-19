@@ -218,6 +218,96 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     }
   };
 
+  // XMI Import/Export state & handlers (CU08 & CU09)
+  const [isXmiModalOpen, setIsXmiModalOpen] = useState<boolean>(false);
+  const [selectedXmiFile, setSelectedXmiFile] = useState<File | null>(null);
+  const [isImportingXmi, setIsImportingXmi] = useState<boolean>(false);
+  const [isExportingXmi, setIsExportingXmi] = useState<boolean>(false);
+  const [xmiError, setXmiError] = useState<string | null>(null);
+  const xmiFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportarXMI = async () => {
+    if (!isOwner) {
+      alert('Solo el propietario del proyecto puede exportar diagramas UML.');
+      return;
+    }
+    if (!diagrama?.id_diagrama) return;
+
+    setIsExportingXmi(true);
+    try {
+      const blob = await diagramaService.exportarXMI(diagrama.id_diagrama);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = (diagrama.nombre || 'diagrama_uml').replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.download = `${safeName}.xmi`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      alert(`Error al exportar XMI: ${err.message || 'Error desconocido'}`);
+    } finally {
+      setIsExportingXmi(false);
+    }
+  };
+
+  const handleOpenXmiModal = () => {
+    if (!isOwner) {
+      alert('Solo el propietario del proyecto puede importar diagramas UML.');
+      return;
+    }
+    setSelectedXmiFile(null);
+    setXmiError(null);
+    setIsXmiModalOpen(true);
+  };
+
+  const handleCloseXmiModal = () => {
+    setIsXmiModalOpen(false);
+    setSelectedXmiFile(null);
+    setXmiError(null);
+    setIsImportingXmi(false);
+    if (xmiFileInputRef.current) {
+      xmiFileInputRef.current.value = '';
+    }
+  };
+
+  const handleXmiFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedXmiFile(file);
+      setXmiError(null);
+    }
+  };
+
+  const handleImportarXMI = async () => {
+    if (!selectedXmiFile) {
+      setXmiError('Por favor selecciona un archivo .xmi o .xml.');
+      return;
+    }
+    if (!diagrama?.id_diagrama) {
+      setXmiError('Diagrama no cargado todavía.');
+      return;
+    }
+    if (classes.length > 0 || relations.length > 0) {
+      setXmiError('El diagrama debe estar completamente vacío antes de importar un archivo XMI.');
+      return;
+    }
+
+    setIsImportingXmi(true);
+    setXmiError(null);
+    try {
+      const res = await diagramaService.importarXMI(diagrama.id_diagrama, selectedXmiFile);
+      await loadDiagramData();
+      alert(res.message || 'Diagrama UML importado exitosamente.');
+      handleCloseXmiModal();
+    } catch (err: any) {
+      setXmiError(err.message || 'Error al importar el archivo XMI.');
+    } finally {
+      setIsImportingXmi(false);
+    }
+  };
+
   // Convert backend API class item to frontend UMLClassNode
   const mapApiClassToNode = (c: ClaseApiItem): UMLClassNode => ({
     id: c.id_clase.toString(),
@@ -1398,6 +1488,34 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
               <span className="hidden md:inline">Importar Imagen</span>
             </button>
+
+            {/* INTEROPERABILIDAD XMI UML (CU08 Y CU09 - SOLO PROPIETARIO) */}
+            {isOwner && (
+              <>
+                <button
+                  onClick={handleExportarXMI}
+                  disabled={isExportingXmi}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm cursor-pointer"
+                  title="Exportar diagrama de clases a archivo XMI 2.1 estándar (CU09)"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    {isExportingXmi ? 'sync' : 'file_download'}
+                  </span>
+                  <span className="hidden md:inline">
+                    {isExportingXmi ? 'Exportando...' : 'Exportar XMI'}
+                  </span>
+                </button>
+
+                <button
+                  onClick={handleOpenXmiModal}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm cursor-pointer"
+                  title="Importar diagrama de clases desde archivo XMI/XML estándar (CU08)"
+                >
+                  <span className="material-symbols-outlined text-[16px]">file_upload</span>
+                  <span className="hidden md:inline">Importar XMI</span>
+                </button>
+              </>
+            )}
 
 
             {/* GENERAR BACKEND ACTION BUTTON (CU10 LINK) */}
@@ -3041,6 +3159,141 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CU08: MODAL PARA IMPORTAR DIAGRAMA UML (XMI / XML) */}
+      {isXmiModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="w-full max-w-lg rounded-2xl bg-surface-container-low border border-outline-variant/30 p-6 shadow-2xl flex flex-col gap-4">
+            {/* Header */}
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-base font-bold text-on-surface flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary text-[20px]">
+                    upload_file
+                  </span>
+                  <span>Importar Diagrama UML (XMI)</span>
+                </h3>
+                <p className="text-xs text-outline mt-1">
+                  XMI/XML UML orientado a interoperabilidad con herramientas CASE como Enterprise Architect.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseXmiModal}
+                disabled={isImportingXmi}
+                className="p-1 rounded-lg hover:bg-surface-container text-outline hover:text-on-surface transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="space-y-4">
+              {/* Check if diagram is empty */}
+              {(classes.length > 0 || relations.length > 0) && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[18px] shrink-0">warning</span>
+                  <div>
+                    <span className="font-semibold block mb-0.5">El diagrama actual no está vacío</span>
+                    <span>
+                      La importación XMI requiere un diagrama vacío ({classes.length} clases y {relations.length} relaciones existentes detectadas).
+                      Por favor, utiliza un diagrama nuevo o vacío para importar.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Upload area */}
+              <div
+                onClick={() => xmiFileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
+                  selectedXmiFile
+                    ? 'border-primary/60 bg-primary/5'
+                    : 'border-outline-variant/40 hover:border-primary/40 bg-surface-container/30'
+                }`}
+              >
+                <input
+                  ref={xmiFileInputRef}
+                  type="file"
+                  accept=".xmi,.xml"
+                  className="hidden"
+                  onChange={handleXmiFileChange}
+                />
+                <span className="material-symbols-outlined text-[36px] text-primary mb-2">
+                  {selectedXmiFile ? 'description' : 'file_upload'}
+                </span>
+                {selectedXmiFile ? (
+                  <div>
+                    <p className="text-xs font-medium text-on-surface">{selectedXmiFile.name}</p>
+                    <p className="text-[11px] text-outline mt-0.5">
+                      {(selectedXmiFile.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-xs font-medium text-on-surface">
+                      Haz clic para seleccionar archivo XMI o XML
+                    </p>
+                    <p className="text-[11px] text-outline mt-1">
+                      Formatos soportados: .xmi, .xml (Máx. 10 MB)
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {xmiError && (
+                <div className="p-3 rounded-lg bg-error-container/30 border border-error/30 text-error text-xs flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[16px] shrink-0">error</span>
+                  <span>{xmiError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-outline-variant/20">
+              <button
+                type="button"
+                onClick={handleCloseXmiModal}
+                disabled={isImportingXmi}
+                className="px-3.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-bright text-xs text-on-surface cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleImportarXMI}
+                disabled={
+                  !selectedXmiFile ||
+                  isImportingXmi ||
+                  classes.length > 0 ||
+                  relations.length > 0
+                }
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  selectedXmiFile &&
+                  !isImportingXmi &&
+                  classes.length === 0 &&
+                  relations.length === 0
+                    ? 'bg-primary text-on-primary hover:bg-primary-fixed-dim cursor-pointer shadow-md'
+                    : 'bg-surface-container-high text-outline cursor-not-allowed opacity-50'
+                }`}
+              >
+                {isImportingXmi ? (
+                  <>
+                    <span className="material-symbols-outlined text-[14px] animate-spin">sync</span>
+                    <span>Importando...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[15px]">publish</span>
+                    <span>Importar Diagrama</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

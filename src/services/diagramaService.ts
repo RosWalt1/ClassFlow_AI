@@ -529,6 +529,44 @@ class DiagramaService {
     });
     return this.handleResponse(res);
   }
+
+  // ==========================================
+  // INTEROPERABILIDAD XMI UML (CU08 Y CU09)
+  // ==========================================
+  async exportarXMI(diagramaId: number): Promise<Blob> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/xmi/exportar`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    if (!res.ok) {
+      let detail = `Error ${res.status}: ${res.statusText}`;
+      try {
+        const errorJson = await res.json();
+        detail = errorJson.detail || detail;
+      } catch {
+        // use default detail
+      }
+      throw new Error(detail);
+    }
+    return res.blob();
+  }
+
+  async importarXMI(diagramaId: number, file: File): Promise<{
+    success: boolean;
+    message: string;
+    total_classes: number;
+    total_relations: number;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/xmi/importar`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: formData,
+    });
+    return this.handleResponse(res);
+  }
 }
 
 export const diagramaService = new DiagramaService();

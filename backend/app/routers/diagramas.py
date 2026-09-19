@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -9,6 +9,7 @@ from app.services.diagrama_service import DiagramaService
 from app.services.ia_service import IAService
 from app.services.voice_service import VoiceService
 from app.services.image_service import ImageService
+from app.services.xmi_service import XMIService
 from app.schemas.ia import IAGenerateRequest, IAGenerateResponse, IAPrecisionProposal, ImageApplyResponse
 from app.schemas.voice import VoiceCommandRequest, VoiceCommandResponse
 from app.schemas.uml import (
@@ -487,5 +488,49 @@ def aplicar_diagrama_imagen(
     )
 
 
+# =============================================================================
+# INTEROPERABILIDAD XMI/XML (CU08 Y CU09)
+# =============================================================================
+@router.get(
+    "/diagramas/{diagrama_id}/xmi/exportar",
+    status_code=status.HTTP_200_OK,
+    summary="Exportar diagrama UML a XMI (CU09)",
+    description="Exporta el modelo de clases UML actual a formato XML XMI 2.1 estándar. Solo accesible por el propietario.",
+)
+def exportar_diagrama_xmi(
+    diagrama_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    xml_content = XMIService.exportar_diagrama(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+    )
+    return Response(
+        content=xml_content,
+        media_type="application/xml",
+        headers={
+            "Content-Disposition": f'attachment; filename="diagrama_{diagrama_id}.xmi"',
+        },
+    )
 
 
+@router.post(
+    "/diagramas/{diagrama_id}/xmi/importar",
+    status_code=status.HTTP_200_OK,
+    summary="Importar diagrama UML desde XMI (CU08)",
+    description="Importa un archivo XMI/XML sobre un diagrama vacío, valida el metamodelo y persiste atómicamente en PostgreSQL. Solo accesible por el propietario.",
+)
+def importar_diagrama_xmi(
+    diagrama_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return XMIService.importar_diagrama(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+        file=file,
+    )
