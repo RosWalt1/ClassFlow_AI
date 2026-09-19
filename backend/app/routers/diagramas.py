@@ -7,7 +7,9 @@ from app.dependencies.auth import get_current_user
 from app.models.usuario import Usuario
 from app.services.diagrama_service import DiagramaService
 from app.services.ia_service import IAService
+from app.services.voice_service import VoiceService
 from app.schemas.ia import IAGenerateRequest, IAGenerateResponse
+from app.schemas.voice import VoiceCommandRequest, VoiceCommandResponse
 from app.schemas.uml import (
     ClaseUMLCreate,
     ClaseUMLUpdate,
@@ -413,4 +415,30 @@ def generar_diagrama_ia(
         user_id=current_user.id_usuario,
         prompt=request.prompt,
     )
+
+
+# =============================================================================
+# COMANDOS DE VOZ (CU06)
+# =============================================================================
+@router.post(
+    "/diagramas/{diagrama_id}/voz/comando",
+    response_model=VoiceCommandResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Gestionar diagrama mediante voz (CU06)",
+    description="Interpreta una orden hablada, valida la operación en el modelo UML y persiste los cambios en PostgreSQL con rollback y notificación WebSocket.",
+)
+def ejecutar_comando_voz(
+    diagrama_id: int,
+    request: VoiceCommandRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return VoiceService.procesar_comando_voz(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+        transcripcion=request.transcripcion,
+    )
+
+
 

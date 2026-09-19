@@ -419,6 +419,26 @@ class DiagramaService {
     });
     return this.handleResponse(res);
   }
+
+  // ==========================================
+  // COMANDOS DE VOZ (CU06)
+  // ==========================================
+  async ejecutarComandoVoz(diagramaId: number, transcripcion: string): Promise<{
+    success: boolean;
+    message: string;
+    transcripcion: string;
+    operation: string;
+    detalles: Record<string, any>;
+    total_classes: number;
+    total_relations: number;
+  }> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/voz/comando`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ transcripcion }),
+    });
+    return this.handleResponse(res);
+  }
 }
 
 export const diagramaService = new DiagramaService();

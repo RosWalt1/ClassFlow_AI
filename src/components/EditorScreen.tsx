@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AppScreen,
   CanonicalUMLRelationType,
@@ -91,9 +91,12 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const [relTargetMult, setRelTargetMult] = useState<string>('0..*');
   const [relName, setRelName] = useState<string>('');
 
-  // AI Assistant Chat & Voice state (CU05)
+  // AI Assistant Chat & Voice state (CU05 & CU06)
   const [isAiCollapsed, setIsAiCollapsed] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [voiceInterimText, setVoiceInterimText] = useState<string>('');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recognitionRef = useRef<any>(null);
   const [aiInputText, setAiInputText] = useState<string>('');
   const [isAiGenerating, setIsAiGenerating] = useState<boolean>(false);
   const [chatMessages, setChatMessages] = useState<
@@ -920,6 +923,154 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       setSaveStatus('error');
     }
   };
+
+  // Voice Command submit via Text (CU06 con SpeechRecognition + DeterministicVoiceParser)
+  const handleVoiceCommand = async (transcription: string) => {
+    if (isAiGenerating) return;
+
+    if (!canEdit) {
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'user', text: `🎤 "${transcription}"` },
+        {
+          sender: 'ai',
+          text: 'Acceso denegado: Tu usuario está en modo Solo lectura y no tiene permiso para modificar el diagrama.',
+          highlight: 'Solo Lectura',
+        },
+      ]);
+      setVoiceInterimText('');
+      setAiInputText('');
+      return;
+    }
+
+    if (!diagrama?.id_diagrama) {
+      alert('Diagrama no cargado todavía.');
+      return;
+    }
+
+    setVoiceError(null);
+    setIsAiGenerating(true);
+
+    try {
+      const res = await diagramaService.ejecutarComandoVoz(diagrama.id_diagrama, transcription);
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'user', text: `🎤 "${transcription}"` },
+        {
+          sender: 'ai',
+          text: res.message || `Comando ejecutado exitosamente (${res.operation}).`,
+          highlight: 'Voz UML',
+        },
+      ]);
+      setAiInputText(transcription);
+      await loadDiagramData();
+    } catch (err: any) {
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'user', text: `🎤 "${transcription}"` },
+        {
+          sender: 'ai',
+          text: err.message || 'Comando de voz no reconocido.',
+          highlight: 'Error Voz',
+        },
+      ]);
+      setVoiceError(err.message);
+    } finally {
+      setIsAiGenerating(false);
+      setVoiceInterimText('');
+    }
+  };
+
+  // SpeechRecognition toggle listening (CU06 oficial del navegador)
+  const toggleListening = () => {
+    if (!canEdit) {
+      alert('Tu usuario está en modo Solo lectura y no tiene permiso para modificar el diagrama mediante voz.');
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (err) {
+          console.warn('Error deteniendo SpeechRecognition:', err);
+        }
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      const msg =
+        'El reconocimiento de voz no está disponible en este navegador. Utiliza Google Chrome o Brave compatible.';
+      setVoiceError(msg);
+      alert(msg);
+      return;
+    }
+
+    setVoiceError(null);
+    setVoiceInterimText('');
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+
+      recognition.lang = 'es-ES';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceInterimText('Escuchando... Di tu comando UML (ej: "Agrega una clase FacturaVoz")');
+      };
+
+      recognition.onresult = (event: any) => {
+        setIsListening(false);
+        const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+        if (transcript) {
+          setVoiceInterimText(`🎤 Texto reconocido: "${transcript}"`);
+          handleVoiceCommand(transcript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        console.warn('SpeechRecognition error:', event.error);
+        if (event.error === 'not-allowed') {
+          setVoiceError('Permiso de micrófono denegado. Permite el acceso al micrófono en el navegador.');
+        } else if (event.error === 'no-speech') {
+          setVoiceError('No se detectó voz. Vuelve a intentar.');
+        } else {
+          setVoiceError(`Error de reconocimiento de voz: ${event.error}`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch (err: any) {
+      setIsListening(false);
+      setVoiceError(`Error al inicializar reconocimiento de voz: ${err.message}`);
+    }
+  };
+
+  // Cleanup de SpeechRecognition al desmontar
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
 
   // AI Assistant prompt submit (CU05)
   const handleAiSend = async () => {
@@ -2253,23 +2404,55 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                           COMANDO DE VOZ: ESCUCHANDO...
                         </span>
                       </div>
+                      <button
+                        onClick={toggleListening}
+                        className="text-[10px] text-error hover:underline px-1.5 py-0.5 rounded bg-error/10 font-medium"
+                      >
+                        Detener
+                      </button>
                     </div>
+                    {voiceInterimText ? (
+                      <div className="text-xs text-on-surface bg-surface/60 p-1.5 rounded border border-outline-variant/30 italic">
+                        "{voiceInterimText}"
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-outline italic">
+                        Habla con claridad. Ej: "Agrega una clase FacturaVoz" o "Relaciona Cliente con Venta uno a muchos"...
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {voiceError && !isListening && (
+                  <div className="bg-error-container/30 border border-error/30 p-2 rounded-lg text-xs text-error flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[14px]">error</span>
+                      <span className="text-[11px]">{voiceError}</span>
+                    </div>
+                    <button
+                      onClick={() => setVoiceError(null)}
+                      className="text-[10px] font-bold hover:underline px-1"
+                    >
+                      ✕
+                    </button>
                   </div>
                 )}
               </div>
 
               <div className="p-2 bg-surface-container flex items-center gap-2 border-t border-outline-variant/20">
                 <button
-                  onClick={() => setIsListening(!isListening)}
+                  onClick={toggleListening}
                   className={`p-2 rounded-lg transition-colors flex items-center justify-center shadow-md ${
                     isListening
-                      ? 'bg-secondary text-on-secondary ring-2 ring-secondary/50'
+                      ? 'bg-error text-on-error ring-2 ring-error/50 animate-pulse'
                       : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
                   }`}
-                  title="Activar/Desactivar micrófono"
+                  title={isListening ? 'Detener escucha de voz' : 'Hablar comando de voz'}
                   disabled={!canEdit || isAiGenerating}
                 >
-                  <span className="material-symbols-outlined text-[18px]">mic</span>
+                  <span className="material-symbols-outlined text-[18px]">
+                    {isListening ? 'stop' : 'mic'}
+                  </span>
                 </button>
                 <input
                   type="text"
