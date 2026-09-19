@@ -77,3 +77,13 @@ class IAGenerateResponse(BaseModel):
     created_relations: int = 0
     total_classes: int = 0
     total_relations: int = 0
+
+
+class ImageApplyResponse(BaseModel):
+    success: bool
+    message: str
+    created_classes: List[str] = []
+    created_relations: int = 0
+    total_classes: int = 0
+    total_relations: int = 0
+

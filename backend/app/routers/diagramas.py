@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -8,7 +8,8 @@ from app.models.usuario import Usuario
 from app.services.diagrama_service import DiagramaService
 from app.services.ia_service import IAService
 from app.services.voice_service import VoiceService
-from app.schemas.ia import IAGenerateRequest, IAGenerateResponse
+from app.services.image_service import ImageService
+from app.schemas.ia import IAGenerateRequest, IAGenerateResponse, IAPrecisionProposal, ImageApplyResponse
 from app.schemas.voice import VoiceCommandRequest, VoiceCommandResponse
 from app.schemas.uml import (
     ClaseUMLCreate,
@@ -439,6 +440,52 @@ def ejecutar_comando_voz(
         user_id=current_user.id_usuario,
         transcripcion=request.transcripcion,
     )
+
+
+# =============================================================================
+# IMPORTAR DIAGRAMA DESDE IMAGEN (CU07)
+# =============================================================================
+@router.post(
+    "/diagramas/{diagrama_id}/imagen/analizar",
+    response_model=IAPrecisionProposal,
+    status_code=status.HTTP_200_OK,
+    summary="Analizar imagen de diagrama de clases UML (CU07)",
+    description="Analiza una imagen (fotografía de pizarrón/papel) con Gemini multimodal y extrae una propuesta UML estructurada. Solo propietario. No modifica la BD.",
+)
+def analizar_diagrama_imagen(
+    diagrama_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return ImageService.analizar_imagen(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+        file=file,
+    )
+
+
+@router.post(
+    "/diagramas/{diagrama_id}/imagen/aplicar",
+    response_model=ImageApplyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Aplicar propuesta de diagrama desde imagen (CU07)",
+    description="Valida y persiste atómicamente la propuesta UML aprobada por el propietario en PostgreSQL y emite diagram.changed.",
+)
+def aplicar_diagrama_imagen(
+    diagrama_id: int,
+    proposal: IAPrecisionProposal,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return ImageService.aplicar_propuesta(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+        proposal=proposal,
+    )
+
 
 
 

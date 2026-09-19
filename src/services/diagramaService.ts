@@ -84,6 +84,67 @@ export interface DiagramaApiItem {
   relaciones: RelacionApiItem[];
 }
 
+export interface ImageProposalAttribute {
+  nombre: string;
+  tipo_dato: string;
+  visibilidad?: string;
+  valor_defecto?: string | null;
+  es_estatico?: boolean;
+  es_final?: boolean;
+  es_nullable?: boolean;
+}
+
+export interface ImageProposalMethodParam {
+  nombre: string;
+  tipo_dato: string;
+  valor_defecto?: string | null;
+}
+
+export interface ImageProposalMethod {
+  nombre: string;
+  tipo_retorno: string;
+  visibilidad?: string;
+  es_estatico?: boolean;
+  es_abstracto?: boolean;
+  parametros?: ImageProposalMethodParam[];
+}
+
+export interface ImageProposalClass {
+  nombre: string;
+  estereotipo?: string | null;
+  visibilidad?: string;
+  es_abstracta?: boolean;
+  atributos?: ImageProposalAttribute[];
+  metodos?: ImageProposalMethod[];
+}
+
+export interface ImageProposalRelation {
+  origen: string;
+  destino: string;
+  tipo: string;
+  nombre?: string | null;
+  multiplicidad_origen?: string | null;
+  multiplicidad_destino?: string | null;
+  rol_origen?: string | null;
+  rol_destino?: string | null;
+  navegabilidad_origen?: boolean;
+  navegabilidad_destino?: boolean;
+}
+
+export interface ImageUMLProposal {
+  classes: ImageProposalClass[];
+  relations: ImageProposalRelation[];
+}
+
+export interface ImageApplyResult {
+  success: boolean;
+  message: string;
+  created_classes: string[];
+  created_relations: number;
+  total_classes: number;
+  total_relations: number;
+}
+
 class DiagramaService {
   private getHeaders(): HeadersInit {
     const token = authService.getToken();
@@ -91,6 +152,11 @@ class DiagramaService {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
+  }
+
+  private getAuthHeaders(): HeadersInit {
+    const token = authService.getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
   private async handleResponse<T>(res: Response): Promise<T> {
@@ -439,6 +505,31 @@ class DiagramaService {
     });
     return this.handleResponse(res);
   }
+
+  // ==========================================
+  // IMPORTAR DIAGRAMA DESDE IMAGEN (CU07)
+  // ==========================================
+  async analizarImagen(diagramaId: number, file: File): Promise<ImageUMLProposal> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/imagen/analizar`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: formData,
+    });
+    return this.handleResponse(res);
+  }
+
+  async aplicarPropuestaImagen(diagramaId: number, proposal: ImageUMLProposal): Promise<ImageApplyResult> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/imagen/aplicar`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(proposal),
+    });
+    return this.handleResponse(res);
+  }
 }
 
 export const diagramaService = new DiagramaService();
+

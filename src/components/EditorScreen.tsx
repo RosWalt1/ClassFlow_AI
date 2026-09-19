@@ -10,7 +10,13 @@ import {
   UserProfile,
 } from '../types';
 import { ASSETS } from '../data/mockData';
-import { diagramaService, DiagramaApiItem, ClaseApiItem, RelacionApiItem } from '../services/diagramaService';
+import {
+  diagramaService,
+  DiagramaApiItem,
+  ClaseApiItem,
+  RelacionApiItem,
+  ImageUMLProposal,
+} from '../services/diagramaService';
 import { proyectoService } from '../services/proyectoService';
 import {
   collaborationService,
@@ -130,6 +136,87 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
   // Determine permissions
   const canEdit = Boolean(diagrama?.permiso_edicion);
+  const isOwner = Boolean(diagrama?.es_propietario);
+
+  // Image Import state & handlers (CU07)
+  const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState<boolean>(false);
+  const [isApplyingImage, setIsApplyingImage] = useState<boolean>(false);
+  const [imageProposal, setImageProposal] = useState<ImageUMLProposal | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenImageModal = () => {
+    if (!isOwner) {
+      alert('Solo el propietario del proyecto puede importar diagramas desde imágenes.');
+      return;
+    }
+    setSelectedImageFile(null);
+    setImageProposal(null);
+    setImageError(null);
+    setIsImageModalOpen(true);
+  };
+
+  const handleCloseImageModal = () => {
+    setIsImageModalOpen(false);
+    setSelectedImageFile(null);
+    setImageProposal(null);
+    setImageError(null);
+    setIsAnalyzingImage(false);
+    setIsApplyingImage(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedImageFile(file);
+      setImageError(null);
+      setImageProposal(null);
+    }
+  };
+
+  const handleAnalizarImagen = async () => {
+    if (!selectedImageFile) {
+      setImageError('Por favor selecciona una imagen (PNG, JPG o JPEG).');
+      return;
+    }
+    if (!diagrama?.id_diagrama) {
+      setImageError('Diagrama no cargado todavía.');
+      return;
+    }
+
+    setIsAnalyzingImage(true);
+    setImageError(null);
+    try {
+      const proposal = await diagramaService.analizarImagen(diagrama.id_diagrama, selectedImageFile);
+      setImageProposal(proposal);
+    } catch (err: any) {
+      setImageError(err.message || 'No se pudo interpretar el diagrama de clases en la imagen. Intenta con una imagen más clara.');
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  };
+
+  const handleAplicarImagen = async () => {
+    if (!imageProposal || !diagrama?.id_diagrama) return;
+
+    setIsApplyingImage(true);
+    setImageError(null);
+    try {
+      const res = await diagramaService.aplicarPropuestaImagen(diagrama.id_diagrama, imageProposal);
+      await loadDiagramData();
+      alert(res.message || 'Diagrama UML aplicado exitosamente.');
+      handleCloseImageModal();
+    } catch (err: any) {
+      setImageError(err.message || 'Error al aplicar el diagrama a la base de datos.');
+    } finally {
+      setIsApplyingImage(false);
+    }
+  };
 
   // Convert backend API class item to frontend UMLClassNode
   const mapApiClassToNode = (c: ClaseApiItem): UMLClassNode => ({
@@ -1292,6 +1379,26 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               <span className="material-symbols-outlined text-[16px]">group_add</span>
               <span className="hidden sm:inline">Compartir</span>
             </button>
+
+            {/* IMPORTAR DIAGRAMA DESDE IMAGEN (CU07) */}
+            <button
+              onClick={handleOpenImageModal}
+              disabled={!isOwner}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm ${
+                isOwner
+                  ? 'bg-surface-container-high hover:bg-surface-bright text-on-surface cursor-pointer'
+                  : 'bg-surface-container-low text-outline opacity-40 cursor-not-allowed'
+              }`}
+              title={
+                isOwner
+                  ? 'Importar diagrama de clases desde imagen o fotografía (CU07)'
+                  : 'Solo el propietario del proyecto puede importar diagramas desde imágenes'
+              }
+            >
+              <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
+              <span className="hidden md:inline">Importar Imagen</span>
+            </button>
+
 
             {/* GENERAR BACKEND ACTION BUTTON (CU10 LINK) */}
             <button
@@ -2680,6 +2787,260 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 </span>
                 <span>{copiedLink ? 'Copiado' : 'Copiar'}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IMPORT FROM IMAGE MODAL (CU07) */}
+      {isImageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-surface-container-low rounded-xl p-6 max-w-lg w-full shadow-2xl border border-outline-variant/30 flex flex-col gap-4 max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[22px]">add_photo_alternate</span>
+                <h3 className="text-base font-bold text-on-surface">Importar Diagrama desde Imagen (CU07)</h3>
+              </div>
+              <button
+                onClick={handleCloseImageModal}
+                className="text-outline hover:text-on-surface cursor-pointer p-1 rounded-md"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="overflow-y-auto flex-1 pr-1 space-y-4">
+              {!imageProposal ? (
+                /* Stage 1: File selection & upload */
+                <div className="space-y-4">
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    Sube una fotografía de un diagrama de clases UML (dibujado en pizarrón o papel) o un archivo digital.
+                    El sistema extraerá clases, atributos, métodos y relaciones para que los revises antes de guardarlos.
+                  </p>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                    onChange={handleImageFileChange}
+                    className="hidden"
+                  />
+
+                  <div className="border-2 border-dashed border-outline-variant/50 rounded-xl p-6 flex flex-col items-center justify-center gap-3 bg-surface-container/50 hover:bg-surface-container transition-colors">
+                    <span className="material-symbols-outlined text-outline text-[40px]">image</span>
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-4 py-2 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary-fixed-dim transition-colors cursor-pointer shadow-sm"
+                      >
+                        Seleccionar imagen
+                      </button>
+                      <p className="text-[11px] text-outline mt-2">Formatos permitidos: PNG, JPG, JPEG (máx. 10 MB)</p>
+                    </div>
+
+                    {selectedImageFile && (
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface w-full max-w-sm justify-between mt-2">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="material-symbols-outlined text-primary text-[18px]">check_circle</span>
+                          <span className="truncate font-medium">{selectedImageFile.name}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-outline shrink-0">
+                          {(selectedImageFile.size / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {isAnalyzingImage && (
+                    <div className="flex items-center justify-center gap-3 p-4 rounded-xl bg-primary/10 border border-primary/20 text-primary">
+                      <span className="material-symbols-outlined text-[20px] animate-spin">sync</span>
+                      <span className="text-xs font-semibold">Analizando imagen del diagrama de clases UML con Gemini...</span>
+                    </div>
+                  )}
+
+                  {imageError && (
+                    <div className="p-3 rounded-lg bg-error-container/30 border border-error/30 text-error text-xs flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[16px] shrink-0">error</span>
+                      <span>{imageError}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Stage 2: Structured Proposal Preview */
+                <div className="space-y-4">
+                  <div className="p-3 rounded-lg bg-surface-container border border-outline-variant/30 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-on-surface block">Vista Previa del Diagrama Detectado</span>
+                      <span className="text-[11px] text-on-surface-variant">Revisa las clases y relaciones extraídas antes de aplicarlas.</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                      <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">
+                        {imageProposal.classes.length} clases
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-tertiary/10 text-tertiary font-semibold">
+                        {imageProposal.relations.length} relaciones
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Detected Classes */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-outline uppercase tracking-wider">Clases Detectadas</h4>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {imageProposal.classes.length === 0 ? (
+                        <p className="text-xs text-outline italic">No se detectaron clases nuevas.</p>
+                      ) : (
+                        imageProposal.classes.map((cls, idx) => (
+                          <div
+                            key={idx}
+                            className="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/30 text-xs space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-on-surface">{cls.nombre}</span>
+                                {cls.estereotipo && (
+                                  <span className="font-mono text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                                    {cls.estereotipo}
+                                  </span>
+                                )}
+                                {cls.es_abstracta && (
+                                  <span className="italic text-[10px] text-amber-500 font-semibold">{'{abstract}'}</span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-outline font-mono">{cls.visibilidad || 'public'}</span>
+                            </div>
+
+                            {/* Attributes */}
+                            {cls.atributos && cls.atributos.length > 0 && (
+                              <div className="pl-2 border-l-2 border-outline-variant/30 space-y-0.5">
+                                <span className="text-[10px] text-outline block">Atributos:</span>
+                                {cls.atributos.map((a, aIdx) => (
+                                  <div key={aIdx} className="font-mono text-[11px] text-on-surface-variant">
+                                    <span className="text-primary font-bold mr-1">
+                                      {a.visibilidad === 'private' ? '-' : a.visibilidad === 'protected' ? '#' : '+'}
+                                    </span>
+                                    <span>{a.nombre}</span>: <span className="text-tertiary">{a.tipo_dato}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Methods */}
+                            {cls.metodos && cls.metodos.length > 0 && (
+                              <div className="pl-2 border-l-2 border-outline-variant/30 space-y-0.5">
+                                <span className="text-[10px] text-outline block">Métodos:</span>
+                                {cls.metodos.map((m, mIdx) => (
+                                  <div key={mIdx} className="font-mono text-[11px] text-on-surface-variant">
+                                    <span className="text-primary font-bold mr-1">
+                                      {m.visibilidad === 'private' ? '-' : m.visibilidad === 'protected' ? '#' : '+'}
+                                    </span>
+                                    <span>{m.nombre}</span>(
+                                    {(m.parametros || []).map((p) => `${p.nombre}: ${p.tipo_dato}`).join(', ')}
+                                    ): <span className="text-tertiary">{m.tipo_retorno || 'void'}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Detected Relations */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-outline uppercase tracking-wider">Relaciones Detectadas</h4>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {imageProposal.relations.length === 0 ? (
+                        <p className="text-xs text-outline italic">No se detectaron relaciones.</p>
+                      ) : (
+                        imageProposal.relations.map((rel, rIdx) => (
+                          <div
+                            key={rIdx}
+                            className="p-2 rounded-lg bg-surface-container-lowest border border-outline-variant/30 text-xs flex items-center justify-between font-mono text-[11px]"
+                          >
+                            <span className="font-bold text-on-surface">
+                              {rel.origen} <span className="text-primary font-normal">({rel.multiplicidad_origen || '1'})</span>
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-surface-container text-primary uppercase font-semibold">
+                              {rel.tipo}
+                            </span>
+                            <span className="font-bold text-on-surface">
+                              <span className="text-primary font-normal">({rel.multiplicidad_destino || '1'})</span> {rel.destino}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {imageError && (
+                    <div className="p-3 rounded-lg bg-error-container/30 border border-error/30 text-error text-xs flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[16px] shrink-0">error</span>
+                      <span>{imageError}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-outline-variant/20">
+              <button
+                type="button"
+                onClick={handleCloseImageModal}
+                disabled={isAnalyzingImage || isApplyingImage}
+                className="px-3.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-bright text-xs text-on-surface cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+
+              {!imageProposal ? (
+                <button
+                  type="button"
+                  onClick={handleAnalizarImagen}
+                  disabled={!selectedImageFile || isAnalyzingImage}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    selectedImageFile && !isAnalyzingImage
+                      ? 'bg-primary text-on-primary hover:bg-primary-fixed-dim cursor-pointer shadow-md'
+                      : 'bg-surface-container-high text-outline cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  {isAnalyzingImage ? (
+                    <>
+                      <span className="material-symbols-outlined text-[14px] animate-spin">sync</span>
+                      <span>Analizando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[15px]">psychology</span>
+                      <span>Analizar imagen</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAplicarImagen}
+                  disabled={isApplyingImage}
+                  className="px-4 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary-fixed-dim cursor-pointer shadow-md flex items-center gap-1.5 transition-all"
+                >
+                  {isApplyingImage ? (
+                    <>
+                      <span className="material-symbols-outlined text-[14px] animate-spin">sync</span>
+                      <span>Aplicando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[15px]">check_circle</span>
+                      <span>Aplicar al diagrama</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
