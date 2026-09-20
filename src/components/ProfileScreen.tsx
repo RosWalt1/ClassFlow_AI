@@ -230,7 +230,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         Anotaciones JPA / Hibernate automáticas
                       </span>
                       <span className="text-[11px] text-on-surface-variant">
-                        Inserta @Entity, @Table, @OneToMany deterministas en el AST
+                        Genera @Entity, @Table, @OneToMany deterministas con Spring Data JPA
                       </span>
                     </div>
                     <input

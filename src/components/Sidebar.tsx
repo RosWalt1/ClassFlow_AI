@@ -23,7 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: 'account_tree',
       hasActiveDot: true,
     },
-    { id: 'backend' as AppScreen, label: 'Generador Backend (CU10)', icon: 'bolt' },
+    { id: 'backend' as AppScreen, label: 'Generador Backend (CU10/CU11)', icon: 'bolt' },
     { id: 'perfil' as AppScreen, label: 'Perfil', icon: 'manage_accounts' },
   ];
 
@@ -78,12 +78,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Bottom AST Engine Badge */}
+      {/* Bottom Stack Badge */}
       <div className="px-2 flex flex-col gap-1 border-t border-outline-variant/20 pt-3">
         <div className="px-2 py-1 bg-surface-container-low/60 rounded border border-outline-variant/30 flex items-center justify-between">
           <div className="flex items-center gap-1 text-on-surface-variant">
             <span className="material-symbols-outlined text-[16px] text-tertiary">bolt</span>
-            {!collapsed && <span className="font-mono text-[11px]">AST Engine v2.4</span>}
+            {!collapsed && <span className="font-mono text-[11px]">Spring Boot 3.2 • Java 17</span>}
           </div>
           {!collapsed && <span className="font-mono text-[10px] text-outline">Snap 8px</span>}
         </div>

@@ -37,7 +37,7 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
   const [newProjectDesc, setNewProjectDesc] = useState(
     'Definición de clases para procesador Stripe, transacciones, webhooks y conciliación contable.'
   );
-  const [newProjectStack, setNewProjectStack] = useState('Spring Boot (Java 21)');
+  const [newProjectStack, setNewProjectStack] = useState('Spring Boot (Java 17)');
   const [newProjectPerms, setNewProjectPerms] = useState('Solo yo (Privado)');
   const [newProjectTemplate, setNewProjectTemplate] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -940,7 +940,7 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
                     onChange={(e) => setNewProjectStack(e.target.value)}
                     className="w-full py-2 px-2.5 rounded-lg bg-surface-container text-on-surface text-xs focus:outline-none focus:ring-1 focus:ring-primary border border-outline-variant/20"
                   >
-                    <option value="Spring Boot (Java 21)">Spring Boot (Java 21)</option>
+                    <option value="Spring Boot (Java 17)">Spring Boot (Java 17)</option>
                   </select>
                 </div>
 
