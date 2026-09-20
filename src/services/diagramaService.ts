@@ -145,6 +145,32 @@ export interface ImageApplyResult {
   total_relations: number;
 }
 
+export interface GeneratedFileItem {
+  path: string;
+  name: string;
+  category: 'model' | 'repository' | 'service' | 'controller' | 'config' | 'root';
+  content: string;
+}
+
+export interface GenerationMetrics {
+  total_classes: number;
+  total_attributes: number;
+  total_methods: number;
+  total_relations: number;
+  total_files: number;
+}
+
+export interface BackendGenerateResponse {
+  success: boolean;
+  framework: string;
+  project_name: string;
+  diagram_name: string;
+  package_name: string;
+  metrics: GenerationMetrics;
+  files: GeneratedFileItem[];
+  summary: string;
+}
+
 class DiagramaService {
   private getHeaders(): HeadersInit {
     const token = authService.getToken();
@@ -564,6 +590,17 @@ class DiagramaService {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: formData,
+    });
+    return this.handleResponse(res);
+  }
+
+  // ==========================================
+  // GENERACIÓN DE BACKEND SPRING BOOT (CU10)
+  // ==========================================
+  async generarBackend(diagramaId: number): Promise<BackendGenerateResponse> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/backend/generar`, {
+      method: 'POST',
+      headers: this.getHeaders(),
     });
     return this.handleResponse(res);
   }

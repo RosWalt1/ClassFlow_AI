@@ -223,7 +223,11 @@ export default function App() {
         )}
 
         {currentScreen === 'backend' && (
-          <BackendGeneratorScreen onNavigate={handleNavigate} currentUser={currentUser} />
+          <BackendGeneratorScreen
+            onNavigate={handleNavigate}
+            currentUser={currentUser}
+            projectId={activeProjectId}
+          />
         )}
 
         {currentScreen === 'perfil' && (

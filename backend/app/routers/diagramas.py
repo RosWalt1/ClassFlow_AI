@@ -10,6 +10,8 @@ from app.services.ia_service import IAService
 from app.services.voice_service import VoiceService
 from app.services.image_service import ImageService
 from app.services.xmi_service import XMIService
+from app.services.generator_service import BackendGeneratorService
+from app.schemas.generator import BackendGenerateResponse
 from app.schemas.ia import IAGenerateRequest, IAGenerateResponse, IAPrecisionProposal, ImageApplyResponse
 from app.schemas.voice import VoiceCommandRequest, VoiceCommandResponse
 from app.schemas.uml import (
@@ -533,4 +535,26 @@ def importar_diagrama_xmi(
         diagrama_id=diagrama_id,
         user_id=current_user.id_usuario,
         file=file,
+    )
+
+
+# =============================================================================
+# GENERACIÓN DE BACKEND SPRING BOOT (CU10)
+# =============================================================================
+@router.post(
+    "/diagramas/{diagrama_id}/backend/generar",
+    response_model=BackendGenerateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generar backend Spring Boot a partir del diagrama UML (CU10)",
+    description="Genera código fuente Java 17 + Spring Boot 3.2 a partir del diagrama UML persistido en PostgreSQL. Solo accesible por el propietario.",
+)
+def generar_backend_spring(
+    diagrama_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    return BackendGeneratorService.generar_backend(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
     )
