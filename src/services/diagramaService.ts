@@ -604,6 +604,38 @@ class DiagramaService {
     });
     return this.handleResponse(res);
   }
+
+  // ==========================================
+  // DESCARGA DE BACKEND GENERADO EN ZIP (CU11)
+  // ==========================================
+  async descargarBackend(diagramaId: number): Promise<{ blob: Blob; filename: string }> {
+    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/backend/descargar`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    if (!res.ok) {
+      let detail = `Error ${res.status}: ${res.statusText}`;
+      try {
+        const errorJson = await res.json();
+        detail = errorJson.detail || detail;
+      } catch {
+        // use default detail
+      }
+      throw new Error(detail);
+    }
+
+    let filename = `ClassFlow_Backend_${diagramaId}.zip`;
+    const disposition = res.headers.get('Content-Disposition');
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) {
+        filename = match[1];
+      }
+    }
+
+    const blob = await res.blob();
+    return { blob, filename };
+  }
 }
 
 export const diagramaService = new DiagramaService();

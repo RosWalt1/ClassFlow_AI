@@ -558,3 +558,31 @@ def generar_backend_spring(
         diagrama_id=diagrama_id,
         user_id=current_user.id_usuario,
     )
+
+
+# =============================================================================
+# DESCARGA DE BACKEND GENERADO EN ARCHIVO ZIP (CU11)
+# =============================================================================
+@router.get(
+    "/diagramas/{diagrama_id}/backend/descargar",
+    status_code=status.HTTP_200_OK,
+    summary="Descargar backend generado en archivo ZIP (CU11)",
+    description="Genera y empaqueta en memoria el proyecto Java 17 + Spring Boot 3.2 en un archivo ZIP para su descarga directa. Solo accesible por el propietario.",
+)
+def descargar_backend_zip(
+    diagrama_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    zip_bytes, filename = BackendGeneratorService.generar_zip(
+        db=db,
+        diagrama_id=diagrama_id,
+        user_id=current_user.id_usuario,
+    )
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )

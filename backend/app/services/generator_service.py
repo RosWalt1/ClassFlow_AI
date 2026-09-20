@@ -1,4 +1,6 @@
+import io
 import re
+import zipfile
 from typing import Dict, List, Optional, Set, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -236,6 +238,37 @@ class BackendGeneratorService:
             files=generated_files,
             summary=f"Backend Spring Boot generado exitosamente: {len(clases)} entidades, {total_attrs} atributos, {total_methods} métodos y {len(relaciones)} relaciones UML procesadas.",
         )
+
+    @classmethod
+    def generar_zip(
+        cls, db: Session, diagrama_id: int, user_id: int
+    ) -> Tuple[bytes, str]:
+        """
+        Reutiliza la generación de CU10 y empaqueta todos los artefactos en un archivo ZIP
+        en memoria de forma determinista (CU11).
+        Retorna una tupla (zip_bytes, filename).
+        """
+        # 1. Reutilizar la generación de CU10 (valida permisos, diagrama, metamodelo y genera código)
+        response = cls.generar_backend(db=db, diagrama_id=diagrama_id, user_id=user_id)
+
+        # 2. Nombre seguro para el archivo ZIP
+        raw_name = response.project_name or "Proyecto"
+        safe_proj = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_name.strip()) or "Proyecto"
+        filename = f"ClassFlow_Backend_{safe_proj}.zip"
+
+        # 3. Empaquetado en memoria
+        zip_buffer = io.BytesIO()
+        root_folder = "backend-generado"
+
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for file_item in response.files:
+                archive_path = f"{root_folder}/{file_item.path}"
+                # Fecha y hora fija (2026-01-01 00:00:00) para garantizar determinismo estricto bit a bit
+                zinfo = zipfile.ZipInfo(filename=archive_path, date_time=(2026, 1, 1, 0, 0, 0))
+                zinfo.compress_type = zipfile.ZIP_DEFLATED
+                zf.writestr(zinfo, file_item.content.encode("utf-8"))
+
+        return zip_buffer.getvalue(), filename
 
     # =========================================================================
     # VALIDACIONES DEL MODELO

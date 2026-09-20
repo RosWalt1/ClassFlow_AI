@@ -144,12 +144,47 @@ export const BackendGeneratorScreen: React.FC<BackendGeneratorScreenProps> = ({
     }
   };
 
-  // CU11 Out of scope handler: inform clearly about CU10 vs CU11 separation
-  const handleDownloadZipNotification = () => {
-    showToast(
-      'Fase 11 (CU11)',
-      'La descarga del archivo .ZIP corresponde a CU11 (siguiente fase). En esta fase (CU10) se realiza la generación e inspección del código Java 17 + Spring Boot.'
-    );
+  // CU11: Download ZIP state
+  const [isDownloadingZip, setIsDownloadingZip] = useState<boolean>(false);
+
+  // Handler for downloading backend ZIP (CU11)
+  const handleDownloadZip = async () => {
+    if (!diagrama?.id_diagrama) {
+      showToast('Error', 'No se ha cargado ningún diagrama válido.');
+      return;
+    }
+
+    if (!isOwner) {
+      showToast('Acceso denegado', 'Solo el propietario del proyecto puede descargar el backend generado (CU11).');
+      return;
+    }
+
+    setIsDownloadingZip(true);
+    try {
+      const { blob, filename } = await diagramaService.descargarBackend(diagrama.id_diagrama);
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.85 },
+      });
+
+      showToast('Descarga completada', `${filename} descargado exitosamente.`);
+    } catch (err: any) {
+      const msg = err.message || 'Error al descargar el archivo ZIP del backend.';
+      showToast('Error de descarga', msg);
+    } finally {
+      setIsDownloadingZip(false);
+    }
   };
 
   // Code display resolution
@@ -763,15 +798,29 @@ volumes:
               </div>
             </div>
 
-            {/* ACTION BUTTONS (CU11 OUT OF SCOPE NOTICE & DOCKER HELPER) */}
+            {/* ACTION BUTTONS (CU11 DOWNLOAD ZIP & DOCKER HELPER) */}
             <div className="flex flex-col gap-2 pt-1">
               <button
-                onClick={handleDownloadZipNotification}
-                className="w-full flex items-center justify-center gap-2 p-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-outline text-xs font-semibold shadow transition-all cursor-pointer border border-outline-variant/30"
-                title="CU11 - Descargar backend generado (Fuera de alcance en Fase 10)"
+                id="btn-descargar-backend"
+                onClick={handleDownloadZip}
+                disabled={isDownloadingZip || isLoadingDiagram || !diagrama || !isOwner}
+                className={`w-full flex items-center justify-center gap-2 p-3 rounded-lg text-xs font-bold shadow transition-all ${
+                  isDownloadingZip
+                    ? 'bg-surface-container text-on-surface-variant cursor-wait'
+                    : !isOwner
+                    ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
+                    : 'bg-primary/90 hover:bg-primary text-on-primary transform active:scale-95 shadow-primary/20 cursor-pointer'
+                }`}
+                title={
+                  !isOwner
+                    ? 'Solo el propietario del proyecto puede descargar el backend (CU11).'
+                    : 'Descargar proyecto Java 17 + Spring Boot completo en archivo .ZIP (CU11)'
+                }
               >
-                <span className="material-symbols-outlined text-[18px]">download</span>
-                <span>DESCARGAR BACKEND (.ZIP) (CU11)</span>
+                <span className={`material-symbols-outlined text-[18px] ${isDownloadingZip ? 'animate-spin' : ''}`}>
+                  {isDownloadingZip ? 'refresh' : 'download'}
+                </span>
+                <span>{isDownloadingZip ? 'EMPAQUETANDO ZIP...' : 'DESCARGAR BACKEND (.ZIP)'}</span>
               </button>
 
               <button
