@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: classflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: classflow_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d classflow_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - classflow_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: classflow-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/classflow_ai
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      PROJECT_NAME: ${PROJECT_NAME:-ClassFlow AI API}
+      API_V1_PREFIX: /api
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CORS_ORIGINS: '["http://localhost","http://localhost:80","http://127.0.0.1","http://127.0.0.1:80"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - classflow_net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: classflow-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - classflow_net
+
+networks:
+  classflow_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
