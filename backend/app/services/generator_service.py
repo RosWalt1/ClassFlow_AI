@@ -163,7 +163,7 @@ class BackendGeneratorService:
             )
 
             # C) Service
-            service_content = cls._generate_service(c.nombre, id_attr_type)
+            service_content = cls._generate_service(c.nombre, id_attr_type, id_attr_name)
             generated_files.append(
                 GeneratedFileItem(
                     path=f"src/main/java/com/app/generated/service/{c.nombre}Service.java",
@@ -202,6 +202,16 @@ class BackendGeneratorService:
                 name="Application.java",
                 category="config",
                 content=app_class_content,
+            )
+        )
+
+        web_config_content = cls._generate_web_config()
+        generated_files.append(
+            GeneratedFileItem(
+                path="src/main/java/com/app/generated/config/WebConfig.java",
+                name="WebConfig.java",
+                category="config",
+                content=web_config_content,
             )
         )
 
@@ -628,8 +638,9 @@ public interface {class_name}Repository extends JpaRepository<{class_name}, {id_
 """
 
     @classmethod
-    def _generate_service(cls, class_name: str, id_type: str) -> str:
+    def _generate_service(cls, class_name: str, id_type: str, id_attr_name: str = "id") -> str:
         var_name = _uncapitalize(class_name)
+        id_cap = _capitalize(id_attr_name)
         return f"""package {BASE_PACKAGE}.service;
 
 import {BASE_PACKAGE}.model.{class_name};
@@ -663,6 +674,11 @@ public class {class_name}Service {{
         return repository.save({var_name});
     }}
 
+    public {class_name} update({id_type} id, {class_name} {var_name}) {{
+        {var_name}.set{id_cap}(id);
+        return repository.save({var_name});
+    }}
+
     public void deleteById({id_type} id) {{
         repository.deleteById(id);
     }}
@@ -685,6 +701,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/{plural_path}")
+@CrossOrigin(origins = "*")
 public class {class_name}Controller {{
 
     private final {class_name}Service service;
@@ -709,6 +726,11 @@ public class {class_name}Controller {{
     @ResponseStatus(HttpStatus.CREATED)
     public {class_name} create(@RequestBody {class_name} {var_name}) {{
         return service.save({var_name});
+    }}
+
+    @PutMapping("/{{id}}")
+    public ResponseEntity<{class_name}> update(@PathVariable {id_type} id, @RequestBody {class_name} {var_name}) {{
+        return ResponseEntity.ok(service.update(id, {var_name}));
     }}
 
     @DeleteMapping("/{{id}}")
@@ -754,6 +776,10 @@ public class {class_name}Controller {{
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
 
         <!-- PostgreSQL Driver -->
         <dependency>
@@ -787,12 +813,37 @@ public class {class_name}Controller {{
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 @SpringBootApplication
+@EntityScan(basePackages = "{BASE_PACKAGE}.model")
+@EnableJpaRepositories(basePackages = "{BASE_PACKAGE}.repository")
 public class Application {{
 
     public static void main(String[] args) {{
         SpringApplication.run(Application.class, args);
+    }}
+}}
+"""
+
+    @classmethod
+    def _generate_web_config(cls) -> str:
+        return f"""package {BASE_PACKAGE}.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {{
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {{
+        registry.addMapping("/**")
+                .allowedOriginPatterns("*")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedHeaders("*");
     }}
 }}
 """
@@ -804,17 +855,18 @@ public class Application {{
 # CONFIGURACIÓN GENERADA POR CLASSFLOW AI (JAVA 17 + SPRING BOOT 3.2)
 # ===================================================================
 spring.application.name={safe_db}
-server.port=8080
+server.address=${{SERVER_ADDRESS:0.0.0.0}}
+server.port=${{PORT:8080}}
 
-# Conexión PostgreSQL
-spring.datasource.url=jdbc:postgresql://localhost:5432/{safe_db}
-spring.datasource.username=postgres
-spring.datasource.password=postgres
+# Conexión PostgreSQL flexible mediante variables de entorno
+# spring.datasource.url=jdbc:postgresql://localhost:5432/{safe_db}
+spring.datasource.url=${{SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/{safe_db}}}
+spring.datasource.username=${{SPRING_DATASOURCE_USERNAME:postgres}}
+spring.datasource.password=${{SPRING_DATASOURCE_PASSWORD:123456}}
 spring.datasource.driver-class-name=org.postgresql.Driver
 
 # Configuración Hibernate / JPA
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.format_sql=true
-spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
 """
