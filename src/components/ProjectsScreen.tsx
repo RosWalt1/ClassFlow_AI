@@ -26,6 +26,26 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
   const [sortOrder, setSortOrder] = useState<'modified' | 'name' | 'classes'>('modified');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // Conectividad nativa online / offline
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isOffline = !isOnline;
+
   // Loading & Error states
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -112,6 +132,10 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
 
   // Handler: Crear nuevo proyecto (CU02)
   const handleCreateProject = async () => {
+    if (isOffline) {
+      setErrorMessage('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!newProjectName.trim()) return;
     setIsCreating(true);
     setErrorMessage(null);
@@ -134,15 +158,23 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
 
   // Handler: Abrir modal de edición
   const handleOpenEdit = (project: ProyectoApiItem) => {
+    setActiveMenuId(null);
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     setEditingProject(project);
     setEditProjectName(project.nombre);
     setEditProjectDesc(project.descripcion || '');
     setIsEditModalOpen(true);
-    setActiveMenuId(null);
   };
 
   // Handler: Guardar cambios de edición (CU02)
   const handleUpdateProject = async () => {
+    if (isOffline) {
+      setErrorMessage('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!editingProject || !editProjectName.trim()) return;
     setIsUpdating(true);
     setErrorMessage(null);
@@ -165,6 +197,10 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
   // Handler: Archivar proyecto (CU02)
   const handleArchiveProject = async (project: ProyectoApiItem) => {
     setActiveMenuId(null);
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!window.confirm(`¿Estás seguro de archivar el proyecto "${project.nombre}"?`)) return;
     try {
       await proyectoService.archiveProyecto(project.id_proyecto);
@@ -178,6 +214,10 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
   // Handler: Eliminar proyecto (CU02)
   const handleDeleteProject = async (project: ProyectoApiItem) => {
     setActiveMenuId(null);
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!window.confirm(`¿Deseas eliminar el proyecto "${project.nombre}"?`)) return;
     try {
       await proyectoService.deleteProyecto(project.id_proyecto);
@@ -191,6 +231,10 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
   // Handler: Abrir modal de gestión de colaboradores
   const handleOpenColaboradores = async (project: ProyectoApiItem) => {
     setActiveMenuId(null);
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     setColabProject(project);
     setColabModalError(null);
     setColabModalSuccess(null);
@@ -328,8 +372,24 @@ export const ProjectsScreen: React.FC<ProjectsScreenProps> = ({
               <span>Importar UML / Imagen</span>
             </button>
             <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary-fixed-dim transition-all shadow-md shadow-primary/25 cursor-pointer transform hover:scale-[1.02] active:scale-98"
+              onClick={() => {
+                if (isOffline) {
+                  setErrorMessage('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+                  return;
+                }
+                setIsCreateModalOpen(true);
+              }}
+              disabled={isOffline}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold transition-all shadow-md ${
+                isOffline
+                  ? 'bg-surface-container text-outline opacity-50 cursor-not-allowed'
+                  : 'bg-primary text-on-primary hover:bg-primary-fixed-dim shadow-primary/25 cursor-pointer transform hover:scale-[1.02] active:scale-98'
+              }`}
+              title={
+                isOffline
+                  ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                  : 'Crear un nuevo proyecto UML'
+              }
             >
               <span className="material-symbols-outlined text-[18px]">add_circle</span>
               <span>+ Nuevo proyecto</span>

@@ -49,6 +49,26 @@ export const BackendGeneratorScreen: React.FC<BackendGeneratorScreenProps> = ({
     }, 3500);
   };
 
+  // Online/Offline detection
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isOffline = !isOnline;
+
   // Determine owner permission (CU10 is strictly for owner)
   const isOwner = Boolean(diagrama?.es_propietario);
 
@@ -102,6 +122,11 @@ export const BackendGeneratorScreen: React.FC<BackendGeneratorScreenProps> = ({
 
   // Handler for explicit backend generation (CU10)
   const handleGenerarBackend = async () => {
+    if (isOffline) {
+      showToast('Sin conexión', 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
+
     if (!diagrama?.id_diagrama) {
       showToast('Error', 'No se ha cargado ningún diagrama válido.');
       return;
@@ -149,6 +174,11 @@ export const BackendGeneratorScreen: React.FC<BackendGeneratorScreenProps> = ({
 
   // Handler for downloading backend ZIP (CU11)
   const handleDownloadZip = async () => {
+    if (isOffline) {
+      showToast('Sin conexión', 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
+
     if (!diagrama?.id_diagrama) {
       showToast('Error', 'No se ha cargado ningún diagrama válido.');
       return;
@@ -328,16 +358,20 @@ volumes:
               <button
                 id="btn-generar-backend"
                 onClick={handleGenerarBackend}
-                disabled={isGenerating || isLoadingDiagram || !diagrama || !isOwner}
+                disabled={isGenerating || isLoadingDiagram || !diagrama || !isOwner || isOffline}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-xs shadow-md transition-all ${
                   isGenerating
                     ? 'bg-surface-container text-on-surface-variant cursor-wait'
+                    : isOffline
+                    ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
                     : !isOwner
                     ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
                     : 'bg-primary hover:bg-inverse-primary text-on-primary transform active:scale-95 shadow-primary/20'
                 }`}
                 title={
-                  !isOwner
+                  isOffline
+                    ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                    : !isOwner
                     ? 'Solo el propietario del proyecto puede ejecutar CU10.'
                     : 'Generar código Java 17 + Spring Boot a partir del diagrama UML'
                 }
@@ -559,14 +593,23 @@ volumes:
                 </p>
                 <button
                   onClick={handleGenerarBackend}
-                  disabled={isGenerating || isLoadingDiagram || !diagrama || !isOwner}
+                  disabled={isGenerating || isLoadingDiagram || !diagrama || !isOwner || isOffline}
                   className={`w-full flex items-center justify-center gap-2 p-2.5 rounded-lg text-xs font-bold transition-all shadow-md ${
                     isGenerating
                       ? 'bg-surface-container text-on-surface-variant cursor-wait'
+                      : isOffline
+                      ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
                       : !isOwner
                       ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
                       : 'bg-primary hover:bg-inverse-primary text-on-primary transform active:scale-95 shadow-primary/20 cursor-pointer'
                   }`}
+                  title={
+                    isOffline
+                      ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                      : !isOwner
+                      ? 'Solo el propietario del proyecto puede ejecutar CU10.'
+                      : 'Generar backend Java'
+                  }
                 >
                   <span className={`material-symbols-outlined text-[16px] ${isGenerating ? 'animate-spin' : ''}`}>
                     {isGenerating ? 'refresh' : 'bolt'}
@@ -803,16 +846,20 @@ volumes:
               <button
                 id="btn-descargar-backend"
                 onClick={handleDownloadZip}
-                disabled={isDownloadingZip || isLoadingDiagram || !diagrama || !isOwner}
+                disabled={isDownloadingZip || isLoadingDiagram || !diagrama || !isOwner || isOffline}
                 className={`w-full flex items-center justify-center gap-2 p-3 rounded-lg text-xs font-bold shadow transition-all ${
                   isDownloadingZip
                     ? 'bg-surface-container text-on-surface-variant cursor-wait'
+                    : isOffline
+                    ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
                     : !isOwner
                     ? 'bg-surface-container text-outline cursor-not-allowed opacity-60'
                     : 'bg-primary/90 hover:bg-primary text-on-primary transform active:scale-95 shadow-primary/20 cursor-pointer'
                 }`}
                 title={
-                  !isOwner
+                  isOffline
+                    ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                    : !isOwner
                     ? 'Solo el propietario del proyecto puede descargar el backend (CU11).'
                     : 'Descargar proyecto Java 17 + Spring Boot completo en archivo .ZIP (CU11)'
                 }

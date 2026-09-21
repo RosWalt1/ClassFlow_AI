@@ -134,9 +134,29 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const [sessionCode, setSessionCode] = useState<string>('');
   const [remoteCursors, setRemoteCursors] = useState<Record<number, RemoteCursor>>({});
 
-  // Determine permissions
-  const canEdit = Boolean(diagrama?.permiso_edicion);
-  const isOwner = Boolean(diagrama?.es_propietario);
+  // Conectividad nativa online / offline
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isOffline = !isOnline;
+
+  // Determine permissions (En modo offline se fuerza lectura para proteger consistencia)
+  const isDiagramOwner = Boolean(diagrama?.es_propietario);
+  const isDiagramEditable = Boolean(diagrama?.permiso_edicion);
+  const canEdit = isDiagramEditable && !isOffline;
+  const isOwner = isDiagramOwner && !isOffline;
 
   // Image Import state & handlers (CU07)
   const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
@@ -148,7 +168,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleOpenImageModal = () => {
-    if (!isOwner) {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
+    if (!isDiagramOwner) {
       alert('Solo el propietario del proyecto puede importar diagramas desde imágenes.');
       return;
     }
@@ -180,6 +204,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleAnalizarImagen = async () => {
+    if (isOffline) {
+      setImageError('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!selectedImageFile) {
       setImageError('Por favor selecciona una imagen (PNG, JPG o JPEG).');
       return;
@@ -202,6 +230,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleAplicarImagen = async () => {
+    if (isOffline) {
+      setImageError('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!imageProposal || !diagrama?.id_diagrama) return;
 
     setIsApplyingImage(true);
@@ -227,7 +259,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const xmiFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportarXMI = async () => {
-    if (!isOwner) {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
+    if (!isDiagramOwner) {
       alert('Solo el propietario del proyecto puede exportar diagramas UML.');
       return;
     }
@@ -253,7 +289,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleOpenXmiModal = () => {
-    if (!isOwner) {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
+    if (!isDiagramOwner) {
       alert('Solo el propietario del proyecto puede importar diagramas UML.');
       return;
     }
@@ -281,6 +321,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleImportarXMI = async () => {
+    if (isOffline) {
+      setXmiError('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!selectedXmiFile) {
       setXmiError('Por favor selecciona un archivo .xmi o .xml.');
       return;
@@ -423,7 +467,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   // WEBSOCKET REAL-TIME COLLABORATION (CU04)
   // =========================================================================
   useEffect(() => {
-    if (!diagrama?.id_diagrama) return;
+    if (!diagrama?.id_diagrama || isOffline) {
+      if (isOffline) {
+        collaborationService.disconnect();
+        setWsStatus('disconnected');
+      }
+      return;
+    }
 
     collaborationService.connect(diagrama.id_diagrama);
 
@@ -513,7 +563,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       unsubDiagramChanged();
       collaborationService.disconnect();
     };
-  }, [diagrama?.id_diagrama]);
+  }, [diagrama?.id_diagrama, isOffline]);
 
   // Selected class helper
   const selectedClass = classes.find((c) => c.id === selectedClassId) || classes[0];
@@ -573,6 +623,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   // CLASE OPERATIONS (CRUD)
   // =========================================================================
   const handleCreateNewClass = async () => {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!diagrama || !canEdit) return;
     const nextCount = classes.length + 1;
     const proposedName = prompt('Nombre de la nueva clase UML:', `Entidad${nextCount}`);
@@ -615,6 +669,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleDeleteSelectedClass = async () => {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!diagrama || !canEdit || !selectedClass) return;
     const ok = confirm(`¿Estás seguro de eliminar la clase '${selectedClass.name}' y todas sus relaciones asociadas?`);
     if (!ok) return;
@@ -1042,6 +1100,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   // RELACIONES OPERATIONS (CRUD)
   // =========================================================================
   const handleOpenRelationModal = (type: CanonicalUMLRelationType | string) => {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!canEdit) {
       alert('Modo solo lectura: No tienes permisos para crear relaciones.');
       return;
@@ -1061,6 +1123,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
   const handleCreateRelationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!diagrama || !canEdit || !selectedClassId || !relTargetId) return;
 
     try {
@@ -1086,6 +1152,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleDeleteRelation = async (relId: string) => {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
     if (!diagrama || !canEdit) return;
     const ok = confirm('¿Deseas eliminar esta relación UML?');
     if (!ok) return;
@@ -1104,6 +1174,21 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   // Voice Command submit via Text (CU06 con SpeechRecognition + DeterministicVoiceParser)
   const handleVoiceCommand = async (transcription: string) => {
     if (isAiGenerating) return;
+
+    if (isOffline) {
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'user', text: `🎤 "${transcription}"` },
+        {
+          sender: 'ai',
+          text: 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.',
+          highlight: 'Modo Offline',
+        },
+      ]);
+      setVoiceInterimText('');
+      setAiInputText('');
+      return;
+    }
 
     if (!canEdit) {
       setChatMessages((prev) => [
@@ -1160,6 +1245,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
   // SpeechRecognition toggle listening (CU06 oficial del navegador)
   const toggleListening = () => {
+    if (isOffline) {
+      alert('Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.');
+      return;
+    }
+
     if (!canEdit) {
       alert('Tu usuario está en modo Solo lectura y no tiene permiso para modificar el diagrama mediante voz.');
       return;
@@ -1253,10 +1343,26 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const handleAiSend = async () => {
     if (!aiInputText.trim() || isAiGenerating) return;
 
+    const query = aiInputText.trim();
+
+    if (isOffline) {
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'user', text: query },
+        {
+          sender: 'ai',
+          text: 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.',
+          highlight: 'Modo Offline',
+        },
+      ]);
+      setAiInputText('');
+      return;
+    }
+
     if (!canEdit) {
       setChatMessages((prev) => [
         ...prev,
-        { sender: 'user', text: aiInputText.trim() },
+        { sender: 'user', text: query },
         {
           sender: 'ai',
           text: 'Acceso denegado: Tu usuario está en modo Solo lectura y no tiene permiso para modificar el diagrama con IA.',
@@ -1272,7 +1378,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       return;
     }
 
-    const query = aiInputText.trim();
     setChatMessages((prev) => [...prev, { sender: 'user', text: query }]);
     setAiInputText('');
     setIsAiGenerating(true);
@@ -1441,11 +1546,20 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             <span className="font-mono text-[11px] text-outline">• PostgreSQL v18</span>
           </div>
 
-          {/* Read-Only Badge */}
+          {/* Read-Only / Offline Badge */}
           {!canEdit && (
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold">
-              <span className="material-symbols-outlined text-[15px]">visibility</span>
-              <span>Modo Solo Lectura</span>
+            <div
+              id="editor-offline-mode-badge"
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold select-none ${
+                isOffline
+                  ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300 shadow-sm animate-pulse'
+                  : 'bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[15px]">
+                {isOffline ? 'cloud_off' : 'visibility'}
+              </span>
+              <span>{isOffline ? 'Modo lectura offline' : 'Modo Solo Lectura'}</span>
             </div>
           )}
         </div>
@@ -1473,14 +1587,16 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             {/* IMPORTAR DIAGRAMA DESDE IMAGEN (CU07) */}
             <button
               onClick={handleOpenImageModal}
-              disabled={!isOwner}
+              disabled={!isDiagramOwner || isOffline}
               className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm ${
-                isOwner
+                isDiagramOwner && !isOffline
                   ? 'bg-surface-container-high hover:bg-surface-bright text-on-surface cursor-pointer'
                   : 'bg-surface-container-low text-outline opacity-40 cursor-not-allowed'
               }`}
               title={
-                isOwner
+                isOffline
+                  ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                  : isDiagramOwner
                   ? 'Importar diagrama de clases desde imagen o fotografía (CU07)'
                   : 'Solo el propietario del proyecto puede importar diagramas desde imágenes'
               }
@@ -1490,13 +1606,21 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             </button>
 
             {/* INTEROPERABILIDAD XMI UML (CU08 Y CU09 - SOLO PROPIETARIO) */}
-            {isOwner && (
+            {isDiagramOwner && (
               <>
                 <button
                   onClick={handleExportarXMI}
-                  disabled={isExportingXmi}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm cursor-pointer"
-                  title="Exportar diagrama de clases a archivo XMI 2.1 estándar (CU09)"
+                  disabled={isExportingXmi || isOffline}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm ${
+                    isOffline
+                      ? 'bg-surface-container-low text-outline opacity-40 cursor-not-allowed'
+                      : 'bg-surface-container-high hover:bg-surface-bright text-on-surface cursor-pointer'
+                  }`}
+                  title={
+                    isOffline
+                      ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                      : 'Exportar diagrama de clases a archivo XMI 2.1 estándar (CU09)'
+                  }
                 >
                   <span className="material-symbols-outlined text-[16px]">
                     {isExportingXmi ? 'sync' : 'file_download'}
@@ -1508,8 +1632,17 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
                 <button
                   onClick={handleOpenXmiModal}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-medium transition-colors shadow-sm cursor-pointer"
-                  title="Importar diagrama de clases desde archivo XMI/XML estándar (CU08)"
+                  disabled={isOffline}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm ${
+                    isOffline
+                      ? 'bg-surface-container-low text-outline opacity-40 cursor-not-allowed'
+                      : 'bg-surface-container-high hover:bg-surface-bright text-on-surface cursor-pointer'
+                  }`}
+                  title={
+                    isOffline
+                      ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                      : 'Importar diagrama de clases desde archivo XMI/XML estándar (CU08)'
+                  }
                 >
                   <span className="material-symbols-outlined text-[16px]">file_upload</span>
                   <span className="hidden md:inline">Importar XMI</span>
@@ -1549,7 +1682,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Agregar Clase UML (C)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Agregar Clase UML (C)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">add_box</span>
           </button>
@@ -1564,7 +1703,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Asociación (---)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Asociación (---)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">horizontal_rule</span>
           </button>
@@ -1576,7 +1721,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Agregación (◇---)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Agregación (◇---)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">diamond</span>
           </button>
@@ -1588,7 +1739,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-secondary hover:text-secondary cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Composición (◆---)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Composición (◆---)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px] text-secondary">diamond</span>
           </button>
@@ -1600,7 +1757,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Herencia / Generalización (△---)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Herencia / Generalización (△---)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">change_history</span>
           </button>
@@ -1612,7 +1775,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Dependencia (- - >)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Dependencia (- - >)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">trending_flat</span>
           </button>
@@ -1624,7 +1793,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Realización (- - △)' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Realización (- - △)'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">call_made</span>
           </button>
@@ -1638,7 +1813,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 ? 'hover:bg-error-container text-error hover:text-on-error-container cursor-pointer'
                 : 'opacity-40 cursor-not-allowed text-outline'
             }`}
-            title={canEdit ? 'Eliminar Clase Seleccionada' : 'Modo solo lectura'}
+            title={
+              isOffline
+                ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                : canEdit
+                ? 'Eliminar Clase Seleccionada'
+                : 'Modo solo lectura'
+            }
           >
             <span className="material-symbols-outlined text-[18px]">delete</span>
           </button>
@@ -2572,8 +2753,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               <span className="text-xs font-semibold text-on-surface">ClassFlow AI Assistant</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-tertiary animate-ping"></span>
-              <span className="font-mono text-[11px] text-tertiary">Copilot Online</span>
+              <span className={`w-2 h-2 rounded-full ${isOffline ? 'bg-outline' : 'bg-tertiary animate-ping'}`}></span>
+              <span className={`font-mono text-[11px] ${isOffline ? 'text-outline' : 'text-tertiary'}`}>
+                {isOffline ? 'Copilot Offline' : 'Copilot Online'}
+              </span>
               <button
                 onClick={() => setIsAiCollapsed(!isAiCollapsed)}
                 className="p-1 text-on-surface-variant hover:text-on-surface ml-1 focus:outline-none cursor-pointer"
@@ -2672,8 +2855,14 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                       ? 'bg-error text-on-error ring-2 ring-error/50 animate-pulse'
                       : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
                   }`}
-                  title={isListening ? 'Detener escucha de voz' : 'Hablar comando de voz'}
-                  disabled={!canEdit || isAiGenerating}
+                  title={
+                    isOffline
+                      ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                      : isListening
+                      ? 'Detener escucha de voz'
+                      : 'Hablar comando de voz'
+                  }
+                  disabled={!canEdit || isAiGenerating || isOffline}
                 >
                   <span className="material-symbols-outlined text-[18px]">
                     {isListening ? 'stop' : 'mic'}
@@ -2682,11 +2871,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 <input
                   type="text"
                   value={aiInputText}
-                  disabled={!canEdit || isAiGenerating}
+                  disabled={!canEdit || isAiGenerating || isOffline}
                   onChange={(e) => setAiInputText(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAiSend()}
                   placeholder={
-                    !canEdit
+                    isOffline
+                      ? 'Disponible cuando vuelva la conexión.'
+                      : !canEdit
                       ? 'Modo Solo lectura (IA deshabilitada)'
                       : isAiGenerating
                       ? 'Generando propuesta con IA...'
@@ -2696,8 +2887,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 />
                 <button
                   onClick={handleAiSend}
-                  disabled={!canEdit || isAiGenerating || !aiInputText.trim()}
+                  disabled={!canEdit || isAiGenerating || !aiInputText.trim() || isOffline}
                   className="p-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container transition-colors shadow-sm flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    isOffline
+                      ? 'Esta función requiere conexión a internet. Disponible cuando vuelva la conexión.'
+                      : 'Enviar instrucción a IA'
+                  }
                 >
                   {isAiGenerating ? (
                     <span className="w-4 h-4 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin"></span>

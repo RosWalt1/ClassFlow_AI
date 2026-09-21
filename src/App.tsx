@@ -9,7 +9,8 @@ import { BackendGeneratorScreen } from './components/BackendGeneratorScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { RegisterScreen } from './components/RegisterScreen';
-import { authService, AuthUser } from './services/authService';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { authService, AuthUser, AuthError } from './services/authService';
 
 export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => authService.getStoredUser());
@@ -20,6 +21,9 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(true);
   const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
   const [activeProjectId, setActiveProjectId] = useState<number | null>(() => {
     try {
       const saved = localStorage.getItem('classflow_active_project_id');
@@ -28,6 +32,20 @@ export default function App() {
       return null;
     }
   });
+
+  // Listener para estado de conectividad nativo del navegador
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const handleOpenProject = (projId: number) => {
     setActiveProjectId(projId);
@@ -45,11 +63,23 @@ export default function App() {
         try {
           const user = await authService.getMe();
           setAuthUser(user);
-        } catch {
-          // Token expired or invalid
-          authService.clearSession();
-          setAuthUser(null);
-          setCurrentScreen('login');
+        } catch (err) {
+          if (err instanceof AuthError) {
+            // Error de autenticación real (401/403): limpiar sesión y redirigir
+            authService.clearSession();
+            setAuthUser(null);
+            setCurrentScreen('login');
+          } else {
+            // Error de conexión/red: tolerar offline y mantener sesión local
+            const stored = authService.getStoredUser();
+            if (stored) {
+              setAuthUser(stored);
+            } else {
+              authService.clearSession();
+              setAuthUser(null);
+              setCurrentScreen('login');
+            }
+          }
         }
       } else {
         setAuthUser(null);
@@ -120,6 +150,7 @@ export default function App() {
   if (currentScreen === 'login') {
     return (
       <div className="relative min-h-screen bg-background text-on-surface">
+        {!isOnline && <OfflineIndicator />}
         <LoginScreen
           onLoginSuccess={handleLoginSuccess}
           onNavigateToRegister={() => setCurrentScreen('register')}
@@ -140,6 +171,7 @@ export default function App() {
   if (currentScreen === 'register') {
     return (
       <div className="relative min-h-screen bg-background text-on-surface">
+        {!isOnline && <OfflineIndicator />}
         <RegisterScreen
           onRegisterSuccess={() => {
             setCurrentScreen('login');
@@ -162,6 +194,7 @@ export default function App() {
   if (!authUser && !isVerifyingSession) {
     return (
       <div className="relative min-h-screen bg-background text-on-surface">
+        {!isOnline && <OfflineIndicator />}
         <LoginScreen
           onLoginSuccess={handleLoginSuccess}
           onNavigateToRegister={() => setCurrentScreen('register')}
@@ -173,6 +206,7 @@ export default function App() {
   // Full IDE Layout for authenticated session
   return (
     <div className="min-h-screen bg-background text-on-surface flex flex-col relative overflow-x-hidden font-sans">
+      {!isOnline && <OfflineIndicator />}
       {/* 1. Global Shell Header */}
       <Header
         currentScreen={currentScreen}
@@ -327,3 +361,6 @@ function QuickScreenSwitcher({
     </div>
   );
 }
+
+
+

@@ -4,6 +4,7 @@
  */
 
 import { authService } from './authService';
+import { projectCache } from './offline/projectCache';
 
 export interface ColaboradorApiItem {
   id_colaborador: number;
@@ -60,36 +61,95 @@ class ProyectoService {
 
   /**
    * Obtiene la lista de proyectos accesibles para el usuario autenticado
+   * Guarda copia en IndexedDB y retorna caché ante errores de conexión u offline.
    */
   async getProyectos(tipo: 'all' | 'owner' | 'guest' = 'all'): Promise<ProyectoApiItem[]> {
-    const response = await fetch(`${API_BASE_URL}/proyectos?tipo=${tipo}`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => null);
-      throw new Error(err?.detail || 'Error al obtener la lista de proyectos.');
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline) {
+      const cached = await projectCache.getCachedProjects(tipo);
+      if (cached && cached.length > 0) {
+        return cached;
+      }
+      throw new Error('Sin conexión a internet y no hay proyectos disponibles en caché local.');
     }
 
-    return response.json();
+    try {
+      const response = await fetch(`${API_BASE_URL}/proyectos?tipo=${tipo}`, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        const detail = err?.detail || `Error ${response.status}: Error al obtener la lista de proyectos.`;
+        const error = new Error(detail);
+        (error as any).status = response.status;
+        throw error;
+      }
+
+      const data: ProyectoApiItem[] = await response.json();
+      // Guardar copia local en IndexedDB en segundo plano
+      projectCache.saveProjects(data).catch((e) => console.warn('[ProjectCache] Error guardando copia:', e));
+      return data;
+    } catch (err: any) {
+      // Si el backend respondió con un error HTTP real (401, 403, 500), NO ocultar
+      if (err.status && err.status >= 400) {
+        throw err;
+      }
+      if (typeof err.message === 'string' && (err.message.startsWith('Error 4') || err.message.startsWith('Error 5'))) {
+        throw err;
+      }
+
+      // Fallo de conectividad / red (Failed to fetch, offline)
+      const cached = await projectCache.getCachedProjects(tipo);
+      if (cached && cached.length > 0) {
+        return cached;
+      }
+      throw err;
+    }
   }
 
   /**
    * Consulta un proyecto por ID
+   * Guarda copia en IndexedDB y retorna caché ante desconexión.
    */
   async getProyecto(idProyecto: number): Promise<ProyectoApiItem> {
-    const response = await fetch(`${API_BASE_URL}/proyectos/${idProyecto}`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => null);
-      throw new Error(err?.detail || 'Error al consultar el proyecto.');
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline) {
+      const cached = await projectCache.getCachedProject(idProyecto);
+      if (cached) return cached;
+      throw new Error('Sin conexión a internet y el proyecto no está disponible en caché local.');
     }
 
-    return response.json();
+    try {
+      const response = await fetch(`${API_BASE_URL}/proyectos/${idProyecto}`, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        const detail = err?.detail || `Error ${response.status}: Error al consultar el proyecto.`;
+        const error = new Error(detail);
+        (error as any).status = response.status;
+        throw error;
+      }
+
+      const data: ProyectoApiItem = await response.json();
+      projectCache.saveProject(data).catch((e) => console.warn('[ProjectCache] Error guardando copia:', e));
+      return data;
+    } catch (err: any) {
+      if (err.status && err.status >= 400) {
+        throw err;
+      }
+      if (typeof err.message === 'string' && (err.message.startsWith('Error 4') || err.message.startsWith('Error 5'))) {
+        throw err;
+      }
+
+      const cached = await projectCache.getCachedProject(idProyecto);
+      if (cached) return cached;
+      throw err;
+    }
   }
 
   /**

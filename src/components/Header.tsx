@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppScreen, UserProfile } from '../types';
 import { ASSETS } from '../data/mockData';
+import { OfflineIndicator } from './OfflineIndicator';
 
 interface HeaderProps {
   currentScreen: AppScreen;
@@ -17,6 +18,22 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-surface-container-lowest/95 backdrop-blur-md px-4 flex items-center justify-between border-b border-outline-variant/30 shadow-[0_1px_8px_rgba(0,0,0,0.3)] select-none">
@@ -50,19 +67,22 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
+      {/* Indicador Global Offline (Paso 4) */}
+      <OfflineIndicator compact={true} />
+
       {/* Right controls: Active collaborators & User profile */}
       <div className="flex items-center gap-3">
         {/* Collaborators online badge */}
         <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/30">
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-tertiary opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-tertiary"></span>
+            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-tertiary opacity-75' : 'bg-outline opacity-40'}`}></span>
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-tertiary' : 'bg-outline'}`}></span>
           </span>
           <span className="font-mono text-xs text-on-surface-variant hidden md:inline">
-            En línea - 2 colaboradores
+            {isOnline ? 'En línea - 2 colaboradores' : 'Desconectado (offline)'}
           </span>
           <span className="font-mono text-xs text-on-surface-variant md:hidden">
-            2 online
+            {isOnline ? '2 online' : 'Offline'}
           </span>
         </div>
 

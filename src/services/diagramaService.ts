@@ -1,5 +1,6 @@
 import { authService } from './authService';
 import { CanonicalUMLRelationType } from '../types';
+import { diagramCache } from './offline/diagramCache';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
@@ -194,7 +195,9 @@ class DiagramaService {
       } catch {
         // use default detail
       }
-      throw new Error(detail);
+      const err = new Error(detail);
+      (err as any).status = res.status;
+      throw err;
     }
     return res.json() as Promise<T>;
   }
@@ -203,19 +206,61 @@ class DiagramaService {
   // DIAGRAMA
   // =========================================================================
   async getDiagrama(diagramaId: number): Promise<DiagramaApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
-    return this.handleResponse<DiagramaApiItem>(res);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline) {
+      const cached = await diagramCache.getCachedDiagramById(diagramaId);
+      if (cached) return cached;
+      throw new Error('Sin conexión a internet y el diagrama no está disponible en caché local.');
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}`, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      });
+      const data = await this.handleResponse<DiagramaApiItem>(res);
+      diagramCache.saveDiagram(data).catch((e) => console.warn('[DiagramCache] Error guardando copia:', e));
+      return data;
+    } catch (err: any) {
+      if (err.status && err.status >= 400) {
+        throw err;
+      }
+      if (typeof err.message === 'string' && (err.message.startsWith('Error 4') || err.message.startsWith('Error 5'))) {
+        throw err;
+      }
+      const cached = await diagramCache.getCachedDiagramById(diagramaId);
+      if (cached) return cached;
+      throw err;
+    }
   }
 
   async getDiagramaProyecto(proyectoId: number): Promise<DiagramaApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/proyectos/${proyectoId}/diagrama`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
-    return this.handleResponse<DiagramaApiItem>(res);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline) {
+      const cached = await diagramCache.getCachedDiagramByProject(proyectoId);
+      if (cached) return cached;
+      throw new Error('Sin conexión a internet y el diagrama no está disponible en caché local.');
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/proyectos/${proyectoId}/diagrama`, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      });
+      const data = await this.handleResponse<DiagramaApiItem>(res);
+      diagramCache.saveDiagram(data).catch((e) => console.warn('[DiagramCache] Error guardando copia:', e));
+      return data;
+    } catch (err: any) {
+      if (err.status && err.status >= 400) {
+        throw err;
+      }
+      if (typeof err.message === 'string' && (err.message.startsWith('Error 4') || err.message.startsWith('Error 5'))) {
+        throw err;
+      }
+      const cached = await diagramCache.getCachedDiagramByProject(proyectoId);
+      if (cached) return cached;
+      throw err;
+    }
   }
 
   async updateDiagrama(diagramaId: number, data: { nombre?: string; descripcion?: string }): Promise<DiagramaApiItem> {

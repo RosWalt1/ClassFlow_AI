@@ -26,6 +26,15 @@ const USER_KEY = 'classflow_auth_user';
 // URL base del backend: usa proxy relativo '/api' con fallback a 'http://localhost:8000/api'
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000/api';
 
+export class AuthError extends Error {
+  status: number;
+  constructor(message: string, status: number = 401) {
+    super(message);
+    this.name = 'AuthError';
+    this.status = status;
+  }
+}
+
 class AuthService {
   /**
    * Almacena el token y los datos del usuario en localStorage
@@ -95,32 +104,56 @@ class AuthService {
 
   /**
    * Obtiene la información del usuario autenticado actual (GET /api/auth/me)
+   * Diferencia fallos de red (mantiene sesión offline) vs errores 401/403 (cierra sesión).
    */
   async getMe(): Promise<AuthUser> {
     const token = this.getToken();
     if (!token) {
-      throw new Error('No hay sesión activa');
+      throw new AuthError('No hay sesión activa', 401);
     }
 
-    const response = await fetch(`${API_BASE_URL}/auth/me`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        this.clearSession();
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          this.clearSession();
+          const errorData = await response.json().catch(() => null);
+          const detail = errorData?.detail || 'Sesión no válida o expirada';
+          throw new AuthError(detail, response.status);
+        }
+
+        // Si es otro código de error del servidor (5xx) pero existe usuario local, usar fallback
+        const localUser = this.getStoredUser();
+        if (localUser) {
+          return localUser;
+        }
+        throw new Error('Error en el servidor');
       }
-      const errorData = await response.json().catch(() => null);
-      const detail = errorData?.detail || 'Sesión no válida o expirada';
-      throw new Error(detail);
-    }
 
-    const user: AuthUser = await response.json();
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-    return user;
+      const user: AuthUser = await response.json();
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+      return user;
+    } catch (error) {
+      // Si es un error de autorización real (401/403), re-lanzarlo para forzar login
+      if (error instanceof AuthError) {
+        throw error;
+      }
+
+      // Si es un fallo de conexión de red (Failed to fetch, offline, timeout, etc.)
+      const localUser = this.getStoredUser();
+      if (localUser) {
+        // Tolerancia offline: preservar sesión y datos locales
+        return localUser;
+      }
+
+      throw error;
+    }
   }
 
   /**
