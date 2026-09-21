@@ -23,8 +23,16 @@ export interface LoginResponse {
 const TOKEN_KEY = 'classflow_access_token';
 const USER_KEY = 'classflow_auth_user';
 
-// URL base del backend: usa proxy relativo '/api' con fallback a 'http://localhost:8000/api'
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000/api';
+// URL base del backend: desarrollo (http://localhost:8000/api) o producción (/api)
+const getApiBaseUrl = (): string => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  return 'http://localhost:8000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export class AuthError extends Error {
   status: number;

@@ -36,9 +36,26 @@ class CollaborationService {
   private cursorThrottleMs = 50;
 
   private getWsUrl(diagramaId: number, token: string): string {
-    const apiBase = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
-    const wsProto = apiBase.startsWith('https') ? 'wss' : 'ws';
-    const host = apiBase.replace(/^https?:\/\//, '');
+    const rawEnv = (import.meta as any).env?.VITE_API_URL;
+    const envBase = typeof rawEnv === 'string' ? rawEnv.trim() : '';
+    let wsProto: string;
+    let host: string;
+
+    if (envBase.startsWith('http')) {
+      wsProto = envBase.startsWith('https') ? 'wss' : 'ws';
+      // Remover protocolo y el sufijo /api para obtener únicamente el host (ej. localhost:8000)
+      host = envBase.replace(/^https?:\/\//, '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
+    } else if (envBase.startsWith('/')) {
+      // Producción relativa (/api) detrás de Nginx o balanceador
+      const loc = typeof window !== 'undefined' ? window.location : null;
+      wsProto = loc?.protocol === 'https:' ? 'wss' : 'ws';
+      host = loc?.host || 'localhost:8000';
+    } else {
+      // Fallback por defecto para desarrollo local
+      wsProto = 'ws';
+      host = 'localhost:8000';
+    }
+
     return `${wsProto}://${host}/api/ws/diagramas/${diagramaId}?token=${encodeURIComponent(token)}`;
   }
 

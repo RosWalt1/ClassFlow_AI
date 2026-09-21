@@ -48,7 +48,16 @@ export interface ProyectoUpdatePayload {
   estado?: string;
 }
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000/api';
+// URL base del backend: desarrollo (http://localhost:8000/api) o producción (/api)
+const getApiBaseUrl = (): string => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  return 'http://localhost:8000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 class ProyectoService {
   private getHeaders(): HeadersInit {

@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.gitignore
+.env*
+backend
+demo-mobile
+generated-backend-mascota
+*.bak
+*.log

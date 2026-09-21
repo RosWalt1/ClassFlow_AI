@@ -2,7 +2,16 @@ import { authService } from './authService';
 import { CanonicalUMLRelationType } from '../types';
 import { diagramCache } from './offline/diagramCache';
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+// URL base del backend: desarrollo (http://localhost:8000/api) o producción (/api)
+const getApiBaseUrl = (): string => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  return 'http://localhost:8000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface ParametroApiItem {
   id_parametro: number;
@@ -214,7 +223,7 @@ class DiagramaService {
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}`, {
+      const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}`, {
         method: 'GET',
         headers: this.getHeaders(),
       });
@@ -243,7 +252,7 @@ class DiagramaService {
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/proyectos/${proyectoId}/diagrama`, {
+      const res = await fetch(`${API_BASE_URL}/proyectos/${proyectoId}/diagrama`, {
         method: 'GET',
         headers: this.getHeaders(),
       });
@@ -264,7 +273,7 @@ class DiagramaService {
   }
 
   async updateDiagrama(diagramaId: number, data: { nombre?: string; descripcion?: string }): Promise<DiagramaApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -288,7 +297,7 @@ class DiagramaService {
       alto?: number;
     }
   ): Promise<ClaseApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/clases`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -308,7 +317,7 @@ class DiagramaService {
       alto?: number;
     }
   ): Promise<ClaseApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases/${claseId}`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/clases/${claseId}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -322,7 +331,7 @@ class DiagramaService {
     posicion_x: number,
     posicion_y: number
   ): Promise<ClaseApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases/${claseId}/posicion`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/clases/${claseId}/posicion`, {
       method: 'PATCH',
       headers: this.getHeaders(),
       body: JSON.stringify({ posicion_x, posicion_y }),
@@ -331,7 +340,7 @@ class DiagramaService {
   }
 
   async deleteClase(diagramaId: number, claseId: number): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/clases/${claseId}`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/clases/${claseId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -354,7 +363,7 @@ class DiagramaService {
       orden?: number;
     }
   ): Promise<AtributoApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/clases/${claseId}/atributos`, {
+    const res = await fetch(`${API_BASE_URL}/clases/${claseId}/atributos`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -375,7 +384,7 @@ class DiagramaService {
       orden?: number;
     }
   ): Promise<AtributoApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/atributos/${atributoId}`, {
+    const res = await fetch(`${API_BASE_URL}/atributos/${atributoId}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -384,7 +393,7 @@ class DiagramaService {
   }
 
   async deleteAtributo(atributoId: number): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/atributos/${atributoId}`, {
+    const res = await fetch(`${API_BASE_URL}/atributos/${atributoId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -405,7 +414,7 @@ class DiagramaService {
       orden?: number;
     }
   ): Promise<MetodoApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/clases/${claseId}/metodos`, {
+    const res = await fetch(`${API_BASE_URL}/clases/${claseId}/metodos`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -424,7 +433,7 @@ class DiagramaService {
       orden?: number;
     }
   ): Promise<MetodoApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/metodos/${metodoId}`, {
+    const res = await fetch(`${API_BASE_URL}/metodos/${metodoId}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -433,7 +442,7 @@ class DiagramaService {
   }
 
   async deleteMetodo(metodoId: number): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/metodos/${metodoId}`, {
+    const res = await fetch(`${API_BASE_URL}/metodos/${metodoId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -449,7 +458,7 @@ class DiagramaService {
       orden?: number;
     }
   ): Promise<ParametroApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/metodos/${metodoId}/parametros`, {
+    const res = await fetch(`${API_BASE_URL}/metodos/${metodoId}/parametros`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -466,7 +475,7 @@ class DiagramaService {
       orden?: number;
     }
   ): Promise<ParametroApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/parametros/${parametroId}`, {
+    const res = await fetch(`${API_BASE_URL}/parametros/${parametroId}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -475,7 +484,7 @@ class DiagramaService {
   }
 
   async deleteParametro(parametroId: number): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/parametros/${parametroId}`, {
+    const res = await fetch(`${API_BASE_URL}/parametros/${parametroId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -500,7 +509,7 @@ class DiagramaService {
       navegabilidad_destino?: boolean;
     }
   ): Promise<RelacionApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/relaciones`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/relaciones`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -521,7 +530,7 @@ class DiagramaService {
       navegabilidad_destino?: boolean;
     }
   ): Promise<RelacionApiItem> {
-    const res = await fetch(`${API_BASE_URL}/api/relaciones/${relacionId}`, {
+    const res = await fetch(`${API_BASE_URL}/relaciones/${relacionId}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -530,7 +539,7 @@ class DiagramaService {
   }
 
   async deleteRelacion(relacionId: number): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/relaciones/${relacionId}`, {
+    const res = await fetch(`${API_BASE_URL}/relaciones/${relacionId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -549,7 +558,7 @@ class DiagramaService {
     total_classes: number;
     total_relations: number;
   }> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/ia/generar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/ia/generar`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ prompt }),
@@ -569,7 +578,7 @@ class DiagramaService {
     total_classes: number;
     total_relations: number;
   }> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/voz/comando`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/voz/comando`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ transcripcion }),
@@ -584,7 +593,7 @@ class DiagramaService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/imagen/analizar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/imagen/analizar`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: formData,
@@ -593,7 +602,7 @@ class DiagramaService {
   }
 
   async aplicarPropuestaImagen(diagramaId: number, proposal: ImageUMLProposal): Promise<ImageApplyResult> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/imagen/aplicar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/imagen/aplicar`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(proposal),
@@ -605,7 +614,7 @@ class DiagramaService {
   // INTEROPERABILIDAD XMI UML (CU08 Y CU09)
   // ==========================================
   async exportarXMI(diagramaId: number): Promise<Blob> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/xmi/exportar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/xmi/exportar`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -631,7 +640,7 @@ class DiagramaService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/xmi/importar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/xmi/importar`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: formData,
@@ -643,7 +652,7 @@ class DiagramaService {
   // GENERACIÓN DE BACKEND SPRING BOOT (CU10)
   // ==========================================
   async generarBackend(diagramaId: number): Promise<BackendGenerateResponse> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/backend/generar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/backend/generar`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
@@ -654,7 +663,7 @@ class DiagramaService {
   // DESCARGA DE BACKEND GENERADO EN ZIP (CU11)
   // ==========================================
   async descargarBackend(diagramaId: number): Promise<{ blob: Blob; filename: string }> {
-    const res = await fetch(`${API_BASE_URL}/api/diagramas/${diagramaId}/backend/descargar`, {
+    const res = await fetch(`${API_BASE_URL}/diagramas/${diagramaId}/backend/descargar`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
